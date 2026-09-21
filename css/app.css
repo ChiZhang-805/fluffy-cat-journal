@@ -19,10 +19,10 @@ button:focus-visible{outline:3px solid #9abbd7;outline-offset:4px} input:focus-v
 .green-bg{background:linear-gradient(125deg,#91df76 -5%,#61c05b 53%,#69c567 100%);opacity:0;overflow:hidden}
 .green-bg i{position:absolute;display:block;width:590px;height:510px;border-radius:50%;background:#41a64b14;top:73px;left:-90px;transform:rotate(-12deg)}
 .green-bg i:nth-child(2){top:360px;left:130px;width:530px;background:#b3ed8812}.green-bg i:nth-child(3){top:520px;left:-315px;background:#3395440c}
-.system-bar{position:absolute;z-index:12;inset:0 0 auto;height:59px;pointer-events:none;color:#0b1514}
-.clock{position:absolute;left:31px;top:21px;font-size:16px;line-height:19px;font-weight:650;letter-spacing:-.6px}
-.island{position:absolute;left:137px;top:12px;width:119px;height:34px;border-radius:24px;background:#050606;box-shadow:inset 0 1px 1px #3335}
-.system-icons{position:absolute;right:25px;top:25px}
+.system-bar{position:absolute;z-index:12;inset:0 0 auto;height:59px;pointer-events:none;color:#000}
+.clock{position:absolute;left:27px;top:19px;width:54px;height:22px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;font-size:17px;line-height:22px;font-weight:600;letter-spacing:-.4px;font-variant-numeric:tabular-nums;font-feature-settings:"tnum";-webkit-font-smoothing:antialiased}
+.island{position:absolute;left:137px;top:11px;width:119px;height:35px;border-radius:20px;background:#000}
+.system-icons{position:absolute;right:27px;top:23px;height:14px;display:flex;align-items:center;gap:7.5px}.system-icons svg{display:block;flex:none;overflow:visible}.system-icons .wifi-icon{margin-top:-.3px}.system-icons .battery-icon{margin-left:.5px}
 .entry-heading{position:absolute;z-index:5;left:18px;right:18px;top:98px;text-align:center;pointer-events:none}
 .entry-kicker{margin:0 0 15px;font-size:9px;letter-spacing:2.2px;color:#8ea4b9;font-weight:650}
 .entry-heading h1{margin:0;font-size:24px;font-weight:680;line-height:1.4;letter-spacing:.15px;color:#153e70;white-space:nowrap}

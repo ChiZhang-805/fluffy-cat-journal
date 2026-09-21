@@ -120,9 +120,43 @@ function trace(mask, width, height) {
     return paths.sort((a, b) => a[0][1] + a[0][0] * .35 - b[0][1] - b[0][0] * .35);
 }
 /**
+ * 输入：points（栅格中心线路径）。
+ * 输出：降噪并轻微圆滑的点列。
+ * 功能：去除像素阶梯和印刷字形的硬拐角，保留字符内容与端点。
+ */
+function smoothCenterline(points) {
+    if (points.length < 4) return points;
+    // 阶段一：移除密集的亚笔宽折点，保留起止点和主要转折。
+    const anchors = [points[0]];
+    for (let i = 1; i < points.length - 1; i++) {
+        if (Math.hypot(points[i][0] - anchors.at(-1)[0], points[i][1] - anchors.at(-1)[1]) >= 2.4) anchors.push(points[i]);
+    }
+    anchors.push(points.at(-1));
+    // 阶段二：两轮 Chaikin 圆滑，不挪动落笔与收笔端点。
+    let result = anchors;
+    for (let pass = 0; pass < 2; pass++) {
+        const next = [result[0]];
+        for (let i = 0; i < result.length - 1; i++) {
+            const a = result[i], b = result[i + 1];
+            next.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]);
+        }
+        next.push(result.at(-1)); result = next;
+    }
+    return result;
+}
+/**
+ * 输入：fraction（笔画时间进度）。
+ * 输出：弧长进度。
+ * 功能：轻微放慢起笔和收笔；笔尖与墨迹共用同一函数。
+ */
+function inkProgress(fraction) {
+    const u = clamp(fraction), eased = u * u * u * (10 + u * (-15 + 6 * u));
+    return u * .68 + eased * .32;
+}
+/**
  * 输入：char（一个字素）。
- * 输出：原字形画布、描写中心线与宽度。
- * 功能：为原手写字库未覆盖的中文、数字和标点生成可描写字形，避免丢字。
+ * 输出：参考字形画布、中心线与宽度。
+ * 功能：提取自绘字库尚未覆盖的字符中心线，最终绘制为手写墨迹而非印刷轮廓。
  */
 function rasterGlyph(char) {
     if (CACHE.has(char))
@@ -131,7 +165,7 @@ function rasterGlyph(char) {
     canvas.width = 104;
     canvas.height = 96;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.font = '500 64px "KaiTi","STKaiti","Noto Serif CJK SC",serif';
+    ctx.font = '400 64px "Kaiti SC","STKaiti","KaiTi","楷体","AR PL KaitiM GB","Noto Serif CJK SC",serif';
     ctx.fillStyle = "#113b73";
     ctx.textBaseline = "alphabetic";
     ctx.fillText(char, 8, 76);
@@ -147,7 +181,7 @@ function rasterGlyph(char) {
 /**
  * 输入：char（字素），size（目标字号）。
  * 输出：该字素的排版宽度。
- * 功能：优先延续确认稿里的拉丁单线字风格，其他字形采用系统字体。
+ * 功能：优先采用自绘笔画；其余字符从本机楷体提取中心线，不分发字体文件。
  */
 function glyphWidth(char, size) {
     if (window.Ink.glyphs[char])
@@ -159,7 +193,7 @@ function glyphWidth(char, size) {
  * 输出：可绘制、可采样笔尖的 line 对象。
  * 功能：在卡片内自动换行与适量缩字号，不截断内容，不将未知汉字替换为空白。
  */
-function makeHandwriting(text, maxWidth = 250, maxHeight = 49) {
+function makeHandwriting(text, maxWidth = 250, maxHeight = 54) {
     const chars = graphemes(text);
     let size = 25, placements;
     // 阶段一：寻找能完整容纳文本的排版，不通过裁切隐藏用户信息。
@@ -172,7 +206,7 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 49) {
                 x = 0;
                 row++;
             }
-            placements.push({ char, x, y: row * size * 1.45, width });
+            placements.push({ char, x, y: row * size * 1.45, row, width });
             x += width;
         }
         if ((row + 1) * size * 1.45 <= maxHeight || size === 12)
@@ -182,7 +216,7 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 49) {
     const strokes = [], glyphs = [];
     let clock = 0;
     // 阶段二：将每个字的真实路径加入同一时间轴；抬笔间隔也属于时间轴。
-    for (const item of placements) {
+    for (const [ordinal, item] of placements.entries()) {
         const core = window.Ink.glyphs[item.char], scale = size / (core ? 25 : 64);
         const glyph = { ...item, start: clock, strokes: [], raster: !core, scale };
         let paths;
@@ -193,9 +227,16 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 49) {
             paths = glyph.source.paths.map(path => path.map(([x, y]) => [x - 8, y - 18]));
         }
         for (const path of paths) {
-            const points = path.map(([x, y]) => [item.x + x * scale, item.y + y * scale]);
+            // 同一字使用固定的微小布白变化，循环回来时不随机改变字样。
+            const tilt = Math.sin(ordinal * 2.41 + item.char.codePointAt(0)) * .023;
+            const sway = Math.sin(ordinal * 1.77) * size * .018;
+            const softened = core ? path : smoothCenterline(path);
+            const points = softened.map(([x, y]) => {
+                const yy = y * scale, xx = x * scale;
+                return [item.x + xx + (.035 + tilt) * (size - yy), item.y + yy + sway];
+            });
             const lengths = arcLengths(points), duration = Math.max(.035, lengths.at(-1) / 115);
-            const st = { points, lengths, start: clock, duration, glyph };
+            const st = { points, lengths, start: clock, duration, glyph, width: 1.85 * (size / 25) ** .65, seed: strokes.length * .61 };
             strokes.push(st);
             glyph.strokes.push(st);
             clock += duration + .055;
@@ -204,7 +245,13 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 49) {
         glyphs.push(glyph);
         clock += item.char === " " ? .025 : .018;
     }
-    return { text, strokes, glyphs, size, duration: Math.max(clock, .1), width: maxWidth, height: maxHeight };
+    // 阶段三：横线由本行墨迹下边缘确定，而不是放在下一项标题上方。
+    const rowCount = Math.max(1, ...placements.map(item => item.row + 1));
+    const ruleOffsets = Array.from({ length: rowCount }, (_, row) => {
+        const ink = strokes.filter(st => st.glyph.row === row).flatMap(st => st.points.map(point => point[1]));
+        return (ink.length ? Math.max(...ink) : (row * 1.45 + 1) * size) + 3;
+    });
+    return { text, strokes, glyphs, size, ruleOffsets, duration: Math.max(clock, .1), width: maxWidth, height: maxHeight };
 }
 /**
  * 输入：stroke（路径），fraction（弧长比例）。
@@ -230,11 +277,11 @@ function sampleHandwriting(line, time) {
     let previous = line.strokes[0]?.points[0] || [0, 0], previousEnd = 0;
     for (const st of line.strokes) {
         if (time < st.start) {
-            const u = clamp((time - previousEnd) / (st.start - previousEnd || 1)), p = u * u * (3 - 2 * u), b = st.points[0];
-            return { x: previous[0] + (b[0] - previous[0]) * p, y: previous[1] + (b[1] - previous[1]) * p - Math.sin(u * Math.PI) * 5, down: false };
+            const u = clamp((time - previousEnd) / (st.start - previousEnd || 1)), p = u * u * u * (10 + u * (-15 + 6 * u)), b = st.points[0];
+            return { x: previous[0] + (b[0] - previous[0]) * p, y: previous[1] + (b[1] - previous[1]) * p - Math.sin(u * Math.PI) ** 2 * 4, down: false };
         }
         if (time <= st.start + st.duration) {
-            const p = strokePoint(st, (time - st.start) / st.duration);
+            const p = strokePoint(st, inkProgress((time - st.start) / st.duration));
             return { x: p[0], y: p[1], down: true };
         }
         previous = st.points.at(-1);
@@ -248,70 +295,48 @@ function sampleHandwriting(line, time) {
  * 功能：仅描画到笔尖所在位置，而不是按文字矩形从左到右擦出。
  */
 function paintStroke(ctx, stroke, fraction) {
-    const target = stroke.lengths.at(-1) * clamp(fraction);
-    ctx.beginPath();
-    ctx.moveTo(...stroke.points[0]);
-    for (let k = 1; k < stroke.points.length; k++) {
-        if (stroke.lengths[k] <= target)
-            ctx.lineTo(...stroke.points[k]);
-        else {
-            ctx.lineTo(...strokePoint(stroke, fraction));
-            break;
-        }
+    const p = inkProgress(fraction);
+    if (p <= 0) return;
+    // 阶段一：沿笔尖相同弧长取点，未经过的位置不提前出现墨迹。
+    if (p >= 1 && stroke.finishedPath) { ctx.fill(stroke.finishedPath); return; }
+    const total = stroke.lengths.at(-1), target = total * p, points = [], distances = [];
+    for (let i = 0; i < stroke.points.length; i++) {
+        if (stroke.lengths[i] >= target) break;
+        points.push(stroke.points[i]); distances.push(stroke.lengths[i]);
     }
-    ctx.stroke();
+    points.push(strokePoint(stroke, p)); distances.push(target);
+    if (points.length < 2) return;
+    // 阶段二：连续笔路展开为有轻重的墨迹带，写完不盖回方正的字体。
+    const left = [], right = [], radii = [];
+    for (let i = 0; i < points.length; i++) {
+        const before = points[Math.max(0, i - 1)], after = points[Math.min(points.length - 1, i + 1)];
+        const dx = after[0] - before[0], dy = after[1] - before[1], length = Math.hypot(dx, dy) || 1;
+        const u = distances[i] / Math.max(.001, total);
+        const pressure = .69 + .3 * Math.sin(Math.PI * u) + .055 * Math.sin(stroke.seed + u * 7);
+        const r = stroke.width * pressure / 2; radii.push(r);
+        left.push([points[i][0] - dy / length * r, points[i][1] + dx / length * r]);
+        right.push([points[i][0] + dy / length * r, points[i][1] - dx / length * r]);
+    }
+    const shape = new Path2D(); shape.moveTo(...left[0]);
+    for (let i = 1; i < left.length; i++) shape.lineTo(...left[i]);
+    for (let i = right.length - 1; i >= 0; i--) shape.lineTo(...right[i]);
+    shape.closePath();
+    shape.moveTo(points[0][0] + radii[0], points[0][1]); shape.arc(...points[0], radii[0], 0, Math.PI * 2);
+    const last = points.at(-1), radius = radii.at(-1);
+    shape.moveTo(last[0] + radius, last[1]); shape.arc(...last, radius, 0, Math.PI * 2);
+    ctx.fill(shape);
+    if (p >= 1) stroke.finishedPath = shape;
 }
 /**
- * 输入：ctx、line、time、x、y（目标绘制位置）。
+ * 输入：ctx、line、time、x、y（目标位置和笔画时间）。
  * 输出：无。
- * 功能：连续显示当前笔画；完成的字形保持原样，在循环回看时不会重写。
+ * 功能：所有字符使用统一手写墨迹，循环回来时保留已写的路径。
  */
 function drawHandwriting(ctx, line, time, x, y) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.strokeStyle = "#113b73";
-    ctx.lineWidth = 1.95 * (line.size / 25) ** .35;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    for (const glyph of line.glyphs) {
-        if (time < glyph.start)
-            break;
-        if (!glyph.raster) {
-            for (const st of glyph.strokes)
-                if (time >= st.start)
-                    paintStroke(ctx, st, (time - st.start) / st.duration);
-            continue;
-        }
-        const { source, scale } = glyph;
-        if (time >= glyph.end) {
-            ctx.drawImage(source.canvas, glyph.x - 8 * scale, glyph.y - 18 * scale, 104 * scale, 96 * scale);
-            continue;
-        }
-        // 当前未知字形使用中心线做遮罩，最终轮廓仍来自原始系统字形。
-        if (!glyph.buffer) {
-            glyph.buffer = document.createElement("canvas");
-            glyph.buffer.width = 104;
-            glyph.buffer.height = 96;
-        }
-        const c = glyph.buffer.getContext("2d");
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.clearRect(0, 0, 104, 96);
-        c.globalCompositeOperation = "source-over";
-        c.save();
-        c.translate(8 - glyph.x / scale, 18 - glyph.y / scale);
-        c.scale(1 / scale, 1 / scale);
-        c.strokeStyle = "#fff";
-        c.lineCap = "round";
-        c.lineJoin = "round";
-        c.lineWidth = 9 * scale;
-        for (const st of glyph.strokes)
-            if (time >= st.start)
-                paintStroke(c, st, (time - st.start) / st.duration);
-        c.restore();
-        c.globalCompositeOperation = "source-in";
-        c.drawImage(source.canvas, 0, 0);
-        c.globalCompositeOperation = "source-over";
-        ctx.drawImage(glyph.buffer, glyph.x - 8 * scale, glyph.y - 18 * scale, 104 * scale, 96 * scale);
+    ctx.save(); ctx.translate(x, y); ctx.fillStyle = "#113b73";
+    for (const stroke of line.strokes) {
+        if (time < stroke.start) break;
+        paintStroke(ctx, stroke, (time - stroke.start) / stroke.duration);
     }
     ctx.restore();
 }

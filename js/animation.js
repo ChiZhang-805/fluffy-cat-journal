@@ -14,6 +14,9 @@ const $ = id => document.getElementById(id);
  * 功能：让同一动画同时支持源码部署和离线HTML。
  */
 const asset = name => window.CAT_ASSETS?.[name] || `assets/${name}`;
+// 活动项的标题、笔路、横线统一使用这个行原点，循环副本只改变整体位移。
+const PAPER = Object.freeze({ originY: 470, pitch: 90, writingOffset: -22, clipTop: 417, clipBottom: 707, labelOffset: -12 });
+const HERO_SPEED = 1 / .85;
 const ANCHORS = [[74, 335, 8, "star"], [316, 332, 7, "star"], [348, 518, 8, "star"], [53, 411, 12, "bar"], [41, 472, 8, "bar"], [41, 548, 11, "bar"], [293, 385, 10, "bar"], [337, 426, 12, "bar"], [212, 322, 9, "bar"], [320, 570, 8, "bar"]];
 /**
  * 输入：ctx、x、y、radius、angle、color（星形外观和位置）。
@@ -97,9 +100,9 @@ class CompanionAnimation {
     setRecord(record) {
         this.record = record;
         this.rows = displayRows(record);
-        this.lines = this.rows.map(row => makeHandwriting(row.value));
+        this.lines = this.rows.map(row => makeHandwriting(row.value, 250, 54));
         let cursor = 2.15;
-        this.schedule = this.lines.map(line => { const duration = M.clamp(line.duration * .83, 2.25, 6.1), slot = { start: cursor, end: cursor + duration }; cursor += duration + .7; return slot; });
+        this.schedule = this.lines.map(line => { const duration = M.clamp(line.duration * .83, 2.25, 6.1), slot = { start: cursor, end: cursor + duration }; cursor += duration + .95; return slot; });
         this.writeEnd = this.schedule.at(-1).end;
         this.duration = this.writeEnd + 11;
         this.saved = false;
@@ -109,7 +112,7 @@ class CompanionAnimation {
      * 输出：当前场景总时长。
      * 功能：入口无剧情时间轴，庆祝和记录分别使用自身时长。
      */
-    maximum() { return this.scene === "entry" ? 0 : this.scene === "celebrate" ? 7 : this.duration; }
+    maximum() { return this.scene === "entry" ? 0 : this.scene === "celebrate" ? 7 / HERO_SPEED : this.duration; }
     /**
      * 输入：无。
      * 输出：阶段编号 0..4。
@@ -127,7 +130,7 @@ class CompanionAnimation {
         this.bridgeAttention = this.attention;
         this.bridgeThinking = this.thinking;
         this.scene = scene;
-        this.time = M.clamp(time, 0, scene === "record" ? this.duration : 7);
+        this.time = M.clamp(time, 0, scene === "record" ? this.duration : 7 / HERO_SPEED);
         if (scene === "celebrate") this.heroClock = time;
         if (scene === "entry") this.entryMode = "idle";
         this.playing = play;
@@ -140,20 +143,26 @@ class CompanionAnimation {
     /**
      * 输入：time（记录场景时间）。
      * 输出：内页累计纵向偏移，单位设计像素。
-     * 功能：完成一行后向上送纸；末尾继续前移至 -270，实现无反向跳回的汇总。
+     * 功能：完成一项后抬笔再送纸；末尾继续前移一圈，实现无反向跳回的汇总。
      */
     paperOffset(time) {
         if (time < 2.15)
-            return -34 * M.range(time, 1.55, 2.15);
+            return PAPER.writingOffset * M.range(time, 1.55, 2.15);
         for (let i = 0; i < 3; i++) {
-            const slot = this.schedule[i], offset = -34 - 90 * i;
+            const slot = this.schedule[i], offset = PAPER.writingOffset - PAPER.pitch * i;
             if (time <= slot.end)
                 return offset;
             if (i < 2 && time < this.schedule[i + 1].start)
-                return M.mix(offset, offset - 90, M.range(time, slot.end, this.schedule[i + 1].start));
+                return M.mix(offset, offset - PAPER.pitch, M.range(time, slot.end + .12, this.schedule[i + 1].start - .12));
         }
-        return M.mix(-214, -270, M.range(time, this.writeEnd + .12, this.writeEnd + 1.8));
+        return M.mix(PAPER.writingOffset - PAPER.pitch * 2, -PAPER.pitch * 3, M.range(time, this.writeEnd + .25, this.writeEnd + 2.25));
     }
+    /**
+     * 输入：index（逻辑行 0..2）、offset（内页累计偏移）。
+     * 输出：内容起点 Y 坐标，尚未做循环取模。
+     * 功能：标题和笔尖使用同一个坐标系，避免 Notes 只在底部副本出现。
+     */
+    rowOrigin(index, offset) { return PAPER.originY + PAPER.pitch * index + offset; }
     /**
      * 输入：index（记录行）、clock（行内笔画时间）、offset（内页偏移）。
      * 输出：{tip,down}，全局画布坐标中的落笔位置。
@@ -161,7 +170,7 @@ class CompanionAnimation {
      */
     linePoint(index, clock, offset) {
         const p = sampleHandwriting(this.lines[index], clock);
-        return { tip: [56 + p.x, 470 + 90 * index + offset + p.y], down: p.down };
+        return { tip: [56 + p.x, this.rowOrigin(index, offset) + p.y], down: p.down };
     }
     /**
      * 输入：time（场景时间）。
@@ -170,7 +179,7 @@ class CompanionAnimation {
      */
     activeNib(time) {
         if (time < this.schedule[0].start) {
-            const dest = this.linePoint(0, 0, -34).tip;
+            const dest = this.linePoint(0, 0, PAPER.writingOffset).tip;
             return { tip: M.point([216, 431], dest, M.range(time, 1.45, 2.15)), down: false };
         }
         for (let i = 0; i < 3; i++) {
@@ -179,11 +188,11 @@ class CompanionAnimation {
                 return this.linePoint(i, (time - slot.start) / (slot.end - slot.start) * this.lines[i].duration, this.paperOffset(time));
             if (i < 2 && time > slot.end && time < this.schedule[i + 1].start) {
                 const a = this.linePoint(i, this.lines[i].duration, this.paperOffset(slot.end)).tip, b = this.linePoint(i + 1, 0, this.paperOffset(this.schedule[i + 1].start)).tip, u = M.range(time, slot.end, this.schedule[i + 1].start), tip = M.point(a, b, u);
-                tip[1] -= Math.sin(u * Math.PI) * 16;
+                tip[1] -= Math.sin(u * Math.PI) ** 2 * 12;
                 return { tip, down: false };
             }
         }
-        return { ...this.linePoint(2, this.lines[2].duration, -214), down: false };
+        return { ...this.linePoint(2, this.lines[2].duration, PAPER.writingOffset - PAPER.pitch * 2), down: false };
     }
     /**
      * 输入：time（记录场景时间）。
@@ -193,7 +202,10 @@ class CompanionAnimation {
     pose(time) {
         const nib = this.activeNib(time), relative = time - this.writeEnd, put = M.range(relative, 0, 2.2), angle = M.mix(-.4 + Math.sin(time * 4.9) * .014 * (1 - put), 1.69, put), tip = M.point(nib.tip, [268, 421], put);
         tip[1] -= Math.sin(put * Math.PI) * 20;
-        return { t: time < this.writeEnd ? time / this.writeEnd * 10.8 : 10.8 + relative, idle: this.idle, pen: { tip, angle }, grip: [tip[0] + Math.sin(angle) * 29, tip[1] - Math.cos(angle) * 29], release: time < this.writeEnd ? 1 - M.range(time, .65, 1.65) : M.range(relative, 2.28, 3.45), penOpacity: M.range(time, .6, 1.5), sleep: M.range(relative, 4, 7.8), headSleep: M.range(relative, 4.7, 8.4), tailSleep: M.range(relative, 5.4, 9.45), nib, pet: Math.sin(Math.PI * M.clamp((this.idle - this.petAt) / 1.6)) };
+        // 目光稍滞后于笔尖；只平滑头部，笔尖仍紧贴真实墨迹。
+        const looked = [0, .06, .12, .18].map(lag => this.activeNib(Math.max(0, time - lag)).tip[0]);
+        const look = M.clamp((looked.reduce((a, b) => a + b, 0) / looked.length - 187) / 110, -1, 1) * (1 - put);
+        return { lookOverride: look, t: time < this.writeEnd ? time / this.writeEnd * 10.8 : 10.8 + relative, idle: this.idle, pen: { tip, angle }, grip: [tip[0] + Math.sin(angle) * 29, tip[1] - Math.cos(angle) * 29], release: time < this.writeEnd ? 1 - M.range(time, .65, 1.65) : M.range(relative, 2.28, 3.45), penOpacity: M.range(time, .6, 1.5), sleep: M.range(relative, 4, 7.8), headSleep: M.range(relative, 4.7, 8.4), tailSleep: M.range(relative, 5.4, 9.45), nib, pet: Math.sin(Math.PI * M.clamp((this.idle - this.petAt) / 1.6)) };
     }
     /**
      * 输入：time（记录场景时间）。
@@ -203,27 +215,33 @@ class CompanionAnimation {
     drawPaper(time) {
         const ctx = this.ctx, offset = this.paperOffset(time);
         this.metrics.paperOffset = offset;
+        this.metrics.paperRows = [];
+        const clipBottom = M.mix(686, PAPER.clipBottom, M.range(time, this.writeEnd + .25, this.writeEnd + 2.25));
+        this.metrics.paperClip = [PAPER.clipTop, clipBottom];
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(42, 435, 310, 271);
-        ctx.clip();
-        for (let i = 0; i < 3; i++) {
-            const slot = this.schedule[i], progress = M.clamp((time - slot.start) / (slot.end - slot.start));
-            for (const position of circularPositions(i, offset)) {
-                const y = 470 + position;
-                if (y + 53 < 435 || y - 32 > 706)
-                    continue;
+        // 阶段一：遵守卡片圆角，但不裁掉正在写的顶部标题。
+        ctx.beginPath(); ctx.roundRect(21, 415, 351, 302, 44); ctx.clip();
+        ctx.beginPath(); ctx.rect(42, PAPER.clipTop, 310, clipBottom - PAPER.clipTop); ctx.clip();
+        // 阶段二：“标题＋内容＋书写线”作为一个完整单元参与循环。
+        for (let i = 0; i < this.rows.length; i++) {
+            const slot = this.schedule[i], line = this.lines[i], progress = M.clamp((time - slot.start) / (slot.end - slot.start));
+            for (const position of circularPositions(i, offset, PAPER.pitch)) {
+                const y = PAPER.originY + position;
+                if (y + (line.ruleOffsets?.at(-1) || line.height) + 2 < PAPER.clipTop || y - 29 > clipBottom) continue;
+                const labelY = y + PAPER.labelOffset;
                 ctx.fillStyle = "#748caf";
-                ctx.font = '600 18px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-                ctx.fillText(this.rows[i].label, 56, y - 12);
-                if (time >= slot.start)
-                    drawHandwriting(ctx, this.lines[i], progress * this.lines[i].duration, 56, y);
-                ctx.strokeStyle = "#dce5ee";
-                ctx.lineWidth = 1.35;
-                ctx.beginPath();
-                ctx.moveTo(53, y + 52);
-                ctx.lineTo(340, y + 52);
-                ctx.stroke();
+                ctx.font = '600 17px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+                ctx.fillText(this.rows[i].label, 56, labelY);
+                // 横线紧随本视觉行的墨迹下边缘；折行后每行也各有一条线。
+                const rules = line.ruleOffsets || [line.size + 3];
+                ctx.strokeStyle = "#dce5ee"; ctx.lineWidth = 1.25;
+                for (const rule of rules) {
+                    ctx.beginPath(); ctx.moveTo(53, y + rule); ctx.lineTo(340, y + rule); ctx.stroke();
+                }
+                if (time >= slot.start) drawHandwriting(ctx, line, progress * line.duration, 56, y);
+                this.metrics.paperRows.push({ index: i, label: this.rows[i].label, labelY, inkY: y,
+                    rules: rules.map(rule => y + rule), active: time >= slot.start && time <= slot.end,
+                    canonical: Math.abs(y - this.rowOrigin(i, offset)) < .001 });
             }
         }
         ctx.restore();
@@ -312,7 +330,7 @@ class CompanionAnimation {
         $("primary").hidden = entry;
         $("confirm-entry").hidden = !entry;
         $("primary").classList.toggle("white", hero);
-        $("primary").disabled = hero ? this.time < 5.8 : record ? this.time < this.writeEnd : false;
+        $("primary").disabled = hero ? this.time < 5.8 / HERO_SPEED : record ? this.time < this.writeEnd : false;
         $("primary-label").textContent = hero ? "Continue" : this.saved ? "再记一条" : this.time >= this.writeEnd + 8.4 ? "完成" : "保存记录";
         $("hero-quote").style.opacity = M.range(this.time, 1.5, 2.5);
         $("hero-subtitle").style.opacity = M.range(this.time, .8, 1.5);
@@ -354,9 +372,9 @@ class CompanionAnimation {
             this.actor.record(ctx, idlePose);
             ctx.restore();
         } else if (this.scene === "celebrate") {
-            this.actor.hero(ctx, this.heroClock);
-            this.drawConfetti(this.heroClock);
-            this.title.draw(ctx, this.time);
+            this.actor.hero(ctx, this.heroClock * HERO_SPEED);
+            this.drawConfetti(this.heroClock * HERO_SPEED);
+            this.title.draw(ctx, this.time * HERO_SPEED);
         } else {
             // 阶段二：卡片由表单原位置连续展开，猫的原图层也沿同一路径进入写字姿态。
             ctx.save();
@@ -364,7 +382,7 @@ class CompanionAnimation {
             this.drawPaper(this.time);
             ctx.restore();
             const pose = this.pose(this.time), bridge = this.bridge ? M.range(this.time, 0, 1.55) : 1;
-            pose.lookOverride = bridge < 1 ? M.mix(.08 + this.bridgeAttention * .22, M.clamp((pose.grip[0] - 176) / 110, -1, 1), bridge) : undefined;
+            pose.lookOverride = bridge < 1 ? M.mix(.08 + this.bridgeAttention * .22, M.clamp((pose.grip[0] - 176) / 110, -1, 1), bridge) : pose.lookOverride;
             pose.headTilt = (-.072 * this.bridgeAttention + .023 * this.bridgeThinking) * (1 - bridge);
             pose.attention = this.bridgeAttention * (1 - bridge);
             pose.thought = this.bridgeThinking * (1 - bridge);

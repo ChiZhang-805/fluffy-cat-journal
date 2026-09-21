@@ -12,8 +12,8 @@ def test_document(extra_js=''):
     head=soup.new_tag('script');head.string='window.CAT_ASSETS='+json.dumps(assets)+';\n'+extra_js
     soup.find('script').insert_before(head)
     for script in soup.find_all('script',src=True):
-        code=(ROOT/script['src']).read_text()
-        if script['src']=='js/app.js':code=code.replace('if (new URLSearchParams(location.search).has("debug")) {','if (true) {')
+        code=(ROOT/script['src'].split('?')[0]).read_text()
+        if script['src'].split('?')[0]=='js/app.js':code=code.replace('if (new URLSearchParams(location.search).has("debug")) {','if (true) {')
         script.attrs={};script.string=code
     for script in list(soup.find_all("script")):
         script.extract();soup.body.append(script)
