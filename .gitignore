@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+*.log
+deployment-result.json
+__pycache__/
+*.pyc
+tests/*results*.json
+tests/*report*.json

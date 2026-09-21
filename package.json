@@ -1,0 +1,8 @@
+{
+  "name": "fluffy-cat-pages",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Minimal workout companion; static GitHub Pages source",
+  "scripts": {"test": "node --test tests/core.test.cjs"},
+  "engines": {"node": ">=20"}
+}

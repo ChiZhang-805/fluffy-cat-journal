@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/><meta name="build-id" content="fluffy-pages-20260921-mic-v2"/>
+<meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport"/>
+<meta content="#f3f7fb" name="theme-color"/>
+<meta content="yes" name="apple-mobile-web-app-capable"/>
+<meta content="default" name="apple-mobile-web-app-status-bar-style"/>
+<meta content="no-referrer" name="referrer"/>
+<title>Fluffy Cat · 运动手记</title>
+<link href="assets/favicon.svg" rel="icon" type="image/svg+xml"/>
+<link href="css/app.css" rel="stylesheet"/><script defer="" src="js/config.js"></script><script defer="" src="js/art.js"></script><script defer="" src="js/math.js"></script><script defer="" src="js/ink.js"></script><script defer="" src="js/texture-mesh.js"></script><script defer="" src="js/cpu-texture-mesh.js"></script><script defer="" src="js/cat-actor.js"></script><script defer="" src="js/hand-title.js"></script><script defer="" src="js/registry.js"></script><script defer="" src="js/model.js"></script><script defer="" src="js/deepseek.js"></script><script defer="" src="js/speech.js"></script><script defer="" src="js/gesture.js"></script><script defer="" src="js/handwriting.js"></script><script defer="" src="js/animation.js"></script><script defer="" src="js/microphone-permission.js"></script><script defer="" src="js/app.js"></script></head>
+<body>
+<button aria-controls="api-popover" aria-expanded="false" aria-haspopup="dialog" aria-label="DeepSeek Chat 设置" class="settings-launcher" id="open-settings" title="DeepSeek API Key">
+<svg aria-hidden="true" viewbox="0 0 24 24"><path d="M4 12c3-5 6-5 8-1s5 4 8-1M4 17c3-5 6-5 8-1s5 4 8-1M16 5h4m-2-2v4"></path></svg>
+<span>DeepSeek</span><span aria-hidden="true" class="key-indicator" id="key-indicator"></span>
+<svg aria-hidden="true" class="settings-chevron" viewbox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></button>
+<main aria-label="运动记录手机应用" class="stage">
+<div class="phone-wrap" id="phone-wrap">
+<div class="phone" id="phone">
+<div class="screen" data-scene="entry" id="screen">
+<div class="cream-bg"></div>
+<div class="green-bg" id="green-bg"><i></i><i></i><i></i></div>
+<div aria-hidden="true" class="system-bar">
+<span class="clock">9:41</span><div class="island"></div>
+<div class="system-icons"><svg height="14" viewbox="0 0 57 14" width="57"><g fill="currentColor"><rect height="4" rx="1" width="3" x="0" y="9"></rect><rect height="7" rx="1" width="3" x="5" y="6"></rect><rect height="10" rx="1" width="3" x="10" y="3"></rect><rect height="13" rx="1" width="3" x="15" y="0"></rect></g><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"><path d="M24 5 Q30 -1 36 5 M26.5 7.5 Q30 4 33.5 7.5 M29 10 L31 10"></path><rect height="10" rx="2" width="14" x="40" y="2"></rect></g><rect fill="currentColor" height="6" rx="1" width="10" x="42" y="4"></rect><rect fill="currentColor" height="4" rx=".7" width="1.5" x="55" y="5"></rect></svg></div>
+</div>
+<button aria-label="返回修改记录" class="back" hidden="" id="back"><svg viewbox="0 0 24 24"><path d="m15 4-8 8 8 8"></path></svg></button>
+<header class="entry-heading" id="entry-heading">
+<p class="entry-kicker">YOUR WORDS. YOUR RECORD.</p>
+<h1>今天的运动，讲给我听。</h1>
+</header>
+<div class="entry-bubble" id="entry-bubble" role="status">我在这里陪你。</div>
+<div class="record-heading" hidden="" id="record-heading"><h2 id="record-title">Log Your Workout</h2><p id="record-subtitle">Write it down, step by step!</p></div>
+<p class="hero-subtitle" hidden="" id="hero-subtitle">You completed today’s workout!</p>
+<p class="hero-quote" hidden="" id="hero-quote">Small steps make<br/>a stronger you.</p>
+<div class="record-card" id="record-card"></div>
+<section aria-label="填写运动记录" class="entry-panel" id="entry-panel">
+<form id="entry-form" novalidate="">
+<label class="field"><span>运动项目</span><input autocomplete="off" id="field-activity" maxlength="40" name="activity" placeholder="例如：跑步" required="" type="text"/></label>
+<label class="field"><span>距离</span><span class="input-wrap"><input autocomplete="off" id="field-distance" inputmode="decimal" maxlength="16" name="distanceKm" pattern="[0-9]*[.]?[0-9]*" placeholder="5.2" required="" type="text"/><span aria-hidden="true" class="unit">km</span></span></label>
+<label class="field"><span>时长</span><span class="input-wrap"><input autocomplete="off" id="field-duration" inputmode="decimal" maxlength="16" name="durationMinutes" pattern="[0-9]*[.]?[0-9]*" placeholder="30" required="" type="text"/><span aria-hidden="true" class="unit">分钟</span></span></label>
+<label class="field"><span>一句话备注</span><input autocomplete="off" id="field-notes" maxlength="32" name="notes" placeholder="今天感觉怎么样？" required="" type="text"/></label>
+</form>
+</section>
+<section aria-label="语音输入" class="voice-panel" hidden="" id="voice-panel">
+<div class="voice-overline" id="voice-overline">正在听你说</div>
+<div class="wave-wrap"><canvas aria-label="实时麦克风音量" height="210" id="voice-wave" width="640"></canvas></div>
+<p aria-live="polite" class="speech-transcript" id="speech-transcript">说说今天做了什么运动。</p>
+<p class="voice-hint" id="voice-hint">松开，交给我整理</p>
+<button class="cancel-voice" id="cancel-voice" type="button">取消</button>
+</section>
+<canvas aria-label="小猫的连续动作与记录书写" height="1704" id="actor-canvas" width="786"></canvas>
+<button aria-label="摸摸小猫" class="pet-hotspot" hidden="" id="pet"></button>
+<button aria-describedby="hold-help" aria-label="确认并继续；长按可以说话" class="primary hold-button" id="confirm-entry" type="button">
+<svg aria-hidden="true" class="mic-icon" viewbox="0 0 24 24"><rect height="11" rx="3" width="6" x="9" y="3"></rect><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M8 21h8"></path></svg>
+<span id="confirm-label">确认并继续</span><svg aria-hidden="true" class="chevron" viewbox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg>
+</button>
+<span class="sr-only" id="hold-help">点击提交手动记录；长按此按钮说话，松开后交给小猫整理。键盘可长按空格键，Escape 取消。</span>
+<button class="primary white" hidden="" id="primary"><span id="primary-label">Continue</span><svg aria-hidden="true" class="chevron" viewbox="0 0 24 24"><path d="m9 5 7 7-7 7"></path></svg></button>
+<button class="edit-record" hidden="" id="edit-record">修改记录</button>
+<div aria-hidden="true" class="home-indicator" id="home-indicator"></div>
+<div class="phone-toast" hidden="" id="phone-toast" role="status"></div>
+<div class="loading" id="loading"><span></span>准备小猫的画笔…</div>
+<p aria-live="polite" class="sr-only" id="record-a11y"></p>
+</div>
+</div>
+</div>
+</main>
+
+<section aria-labelledby="api-heading" aria-modal="false" class="api-popover" hidden="" id="api-popover" role="dialog">
+<h2 id="api-heading">DeepSeek Chat</h2>
+<form id="api-form" novalidate="">
+<label class="sr-only" for="api-key">API Key</label>
+<input autocapitalize="off" autocomplete="off" class="api-key-input" id="api-key" maxlength="256" placeholder="API Key" required="" spellcheck="false" type="password"/>
+<p class="api-feedback" id="api-feedback" role="status"></p>
+<div class="api-actions"><button class="settings-save" id="save-api" type="submit">启用</button><button class="forget-key" id="forget-key" type="button">清除</button></div>
+</form></section></body>
+</html>
