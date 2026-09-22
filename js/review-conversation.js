@@ -29,9 +29,11 @@ __fluffyModules["review-conversation.js"] = (() => {
             throw Error("小猫的话还没说完整，请再试一次。");
         let body;
         try {
-            body = JSON.parse(String(choice.message?.content || "").replace(/^```(?:json)?\s*|\s*```$/g, ""));
+            if (__fluffyModules["ai-policy.js"]) body = __fluffyModules["ai-policy.js"].json(result);
+            else body = JSON.parse(String(choice.message?.content || "").replace(/^```(?:json)?\s*|\s*```$/g, ""));
         }
-        catch {
+        catch (error) {
+            if (error.code) throw error;
             throw Error("回复格式没有整理好，请再试一次。");
         }
         if (!Array.isArray(body.replies))
@@ -52,21 +54,22 @@ __fluffyModules["review-conversation.js"] = (() => {
      * 功能：真正调用模型，且只传当前板块资料。
      */
     async function request({ api, bailian, view, history = [], text = "", audio = null, lang = "zh", opening = false, signal }) {
-        const client = audio ? bailian : api.configured ? api : bailian;
+        const P = __fluffyModules["ai-policy.js"];
+        P?.throwIfAborted(signal);
+        if (audio) throw new (P?.AIError || Error)("speech-unsupported", "请先把声音转成文字，再和小猫聊。");
+        const client = P ? P.language(api) : api;
         if (!client?.configured)
             throw Error("先在右上角启用 AI，再和小猫聊吧。");
         // 阶段一：上下文白名单。对话只保留最近六轮，不含其他类别、Key、原图或未确认字段。
         const prior = history.slice(-12).map(t => ({ role: t.role === "assistant" ? "assistant" : "user", content: String(t.content).slice(0, 600) }));
         const messages = [{ role: "system", content: prompt(lang, opening, Boolean(audio)) + " If the user explicitly asks to log a new event or correct an old entry, never claim it is already saved. The app can offer a separate confirmation flow. Distinguish a changed feeling now from correcting a wrong earlier feeling. Only explain briefly and wait for the user to confirm. In English mode every reply must be English even when the source records are Chinese; transcript remains verbatim." }, { role: "user", content: JSON.stringify({ context: Data.context(view) }) }, ...prior];
         const instruction = opening ? (lang === "en" ? "Please greet me about this record." : "看看这份记录，和我聊一句吧。") : String(text).trim().slice(0, 4000);
-        if (audio && (!/^data:audio\/wav;base64,[A-Za-z0-9+/=]+$/.test(audio.data || "") || audio.data.length > 5e6))
-            throw Error("录音格式或长度不合适，请重试。");
-        messages.push({ role: "user", content: audio ? [{ type: "input_audio", input_audio: { data: audio.data, format: "wav" } }, { type: "text", text: "请回应这段话，返回包含实际转写和短句的JSON。" }] : instruction });
-        // 阶段二：使用已有隔离密钥客户端；原始音频只走百炼音频模型，不假装交给文本模型。
-        const isBailian = client.provider === "bailian";
-        const payload = { model: audio ? client.audioModel : client.model, messages, max_tokens: 950, temperature: .65, stream: Boolean(audio),
-            ...(isBailian ? { enable_thinking: false } : { thinking: { type: "disabled" } }),
-            ...(audio ? { modalities: ["text"], stream_options: { include_usage: true } } : { response_format: { type: "json_object" } }) };
+        if (!instruction) throw new (P?.AIError || Error)("no-text", "想说的话还没有填写。");
+        if (String(text).length > 4000) throw new (P?.AIError || Error)("speech-too-long", "这段话有点长。");
+        messages.push({ role: "user", content: instruction });
+        // 阶段二：只向DeepSeek发文字；不把原始音频或百炼Key带入对话。
+        const payload = { model: client.model, messages, max_tokens: 950, temperature: .65,
+            stream: false, thinking: { type: "disabled" }, response_format: { type: "json_object" } };
         const response = await client.request(client.routes.chat, payload, signal);
         if (signal?.aborted)
             throw new DOMException("已取消", "AbortError");

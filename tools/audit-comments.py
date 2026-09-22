@@ -5,7 +5,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ['icons.js','record-intent.js','locale-ui.js','display-language.js','journal-store.js','review-data.js','app.js','home-board.js','review.js','entry-menu.js','entry-action.js','ai-journal.js','review-conversation.js','bailian-settings.js']
+FILES = ['ai-policy.js','cat-feedback.js','bubble-copy.js','deepseek.js','bailian.js','speech.js','ai-journal.js','app.js','review.js','review-conversation.js','record-intent.js','display-language.js','bailian-settings.js','photo-draft.js','photo-input.js']
 DECL = re.compile(r'^([ \t]*)(?:(?:async|static|get|set)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)\s*\([^\n]*\)\s*\{', re.M)
 EXCLUDED = {'if','for','while','switch','catch','with'}
 
@@ -32,7 +32,7 @@ def audit():
 
 if __name__=='__main__':
     items=audit()
-    payload={'scope':'Named declarations and class methods in fourteen changed modules; inline event callbacks excluded','count':len(items),'results':items}
+    payload={'scope':'Named declarations and class methods in release modules including photo ownership and decoding; inline event callbacks excluded','count':len(items),'results':items}
     output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'tests/results/comment-v11-audit.json'
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')

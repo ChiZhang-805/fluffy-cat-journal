@@ -5,7 +5,7 @@ __fluffyModules["app.js"] = (() => {
     const { DeepSeekClient } = __fluffyModules["deepseek.js"];
     const { BailianClient } = __fluffyModules["bailian.js"];
     const { BailianSettings } = __fluffyModules["bailian-settings.js"];
-    const { AudioSession } = __fluffyModules["audio-session.js"];
+    const Feedback = __fluffyModules["cat-feedback.js"], Policy = __fluffyModules["ai-policy.js"], PhotoDraft = __fluffyModules["photo-draft.js"];
     const Sleep = __fluffyModules["sleep-time.js"];
     const Locale = __fluffyModules["entry-i18n.js"];
     const Intent = __fluffyModules["record-intent.js"], Display = __fluffyModules["display-language.js"];
@@ -53,14 +53,19 @@ __fluffyModules["app.js"] = (() => {
     const state = {
         entryComplete: false, entryCanSubmit: false,
         recordDate: Sleep.dateKey(), draftDates: {}, editingId: null, sleepDates: {}, emotionDraft: null, voiceBackend: "text",
+        pendingUtterance: null, speechRetry: false, photoJob: null, photoOwned: {}, photoRead: 0,
         category: "sport", phase: "idle", serial: 0, task: null, record: null, source: "manual", estimated: false, versions: {}, drafts: {}, keySerial: 0, keyTask: null, filter: "all", sheetClose: null, focusRecord: null, timerNotified: false, taskId: null
     };
     const animation = new CompanionAnimation({ onReady, onRender: renderExtras, synchronize: synchronizeUI });
     const microphone = new MicrophonePermission(), photo = new PhotoInput(), timer = new FocusTimer();
     const speech = new SpeechSession({
-        onLevel: audioLevel, onText: receivedSpeech, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech
+        onLevel: audioLevel, onText: receivedSpeech, onStarted: listeningStarted, onError: voiceFailed, onLimit: () => { gesture?.disarm(); releaseSpeech(); }
     });
-    const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
+    // 原始音频不再交给百炼。保留兼容变量供旧调试入口读取，不采集或上传第二份录音。
+    const rawAudio = {
+        /** 输入：无。输出：无。功能：兼容旧调试入口；不采集原始音频。 */
+        cancel() {}
+    };
     let activeSpeech = speech, bailianSettings;
     let timeRange = null, formLayout = null, review = null, entryMenu = null;
     let lastEntryAction = "";
@@ -70,38 +75,61 @@ __fluffyModules["app.js"] = (() => {
      * 输出：无。
      * 功能：在猫咪右上角给出简短状态，不常驻冗余说明。
      */
-    function bubble(text, error = false) {
+    function bubble(text, error = false, context = {}) {
         state.bubbleText = text;
-        const detail = BubbleCopy.render($("entry-bubble"), text, error);
+        state.bubbleError = error;
+        state.bubbleContext = context;
+        BubbleCopy.render($("entry-bubble"), text, error, context);
         $("entry-bubble").dataset.language = Locale.language();
-        if (detail)
-            toast(detail);
+        updateSpeechRetry();
     }
     /**
-     * 输入：text。
+     * 输入：text（操作或错误）、context（可选校验信息）。
      * 输出：无。
-     * 功能：仅操作或错误时出现的临时提示。
+     * 功能：所有旧toast调用统一转到当前小猫气泡，不在底部主按钮上方显示提示条。
      */
-    function toast(text) {
+    function toast(text, context = {}) {
         clearTimeout(toastTimer);
-        $("phone-toast").textContent = Locale.message(text);
-        $("phone-toast").hidden = false;
-        toastTimer = setTimeout(() => {
-            $("phone-toast").hidden = true;
-        }, 4300);
+        $("phone-toast").hidden = true;
+        $("phone-toast").textContent = "";
+        if (review?.active) { review.notify(text); return; }
+        if (animation.scene === "home") { homeBubble(text, true); return; }
+        if (animation.scene === "entry") { bubble(text, true, context); return; }
+        // 无表单时也使用短对白，不显示接口正文或含用户数据的调试信息。
+        let n = $("page-cat-notice");
+        if (!n) { n = el("div", "page-cat-notice"); n.id = "page-cat-notice"; n.setAttribute("role", "status"); $("screen").append(n); }
+        n.hidden = false;
+        BubbleCopy.render(n, text, true, context);
+        toastTimer = setTimeout(() => { n.hidden = true; }, 5000);
     }
     /**
-     * 输入：text。
+     * 输入：text、error。
      * 输出：无。
-     * 功能：首页互动气泡短暂出现，不遮住卡片。
+     * 功能：首页提示仍使用原气泡；失败不伪装成已填好，也不创建底部提示条。
      */
-    function homeBubble(text) {
+    function homeBubble(text, error = false) {
         clearTimeout(homeBubbleTimer);
-        const detail = BubbleCopy.render($("home-bubble"), text);
-        if (detail)
-            toast(detail);
+        BubbleCopy.render($("home-bubble"), text, error);
         $("home-bubble").classList.add("visible");
-        homeBubbleTimer = setTimeout(() => BubbleCopy.render($("home-bubble"), "home"), 4200);
+        if (!error) homeBubbleTimer = setTimeout(() => BubbleCopy.render($("home-bubble"), "home"), 4200);
+    }
+    /**
+     * 输入：无，读取当前待重试原话与场景。
+     * 输出：无。
+     * 功能：用户显式点击小猫气泡才重试；不会再次录音、自动存记录或跨页面回填。
+     */
+    function updateSpeechRetry() {
+        const n = $("entry-bubble"), p = state.pendingUtterance;
+        const photoReady = Boolean(state.bubbleContext?.photoRetry && currentPhotoJob()
+            && ["failed", "waiting-key", "canceled", "needs-info"].includes(state.photoJob.status));
+        const ready = state.phase === "idle" && (photoReady || Boolean(state.speechRetry && p && p.category === state.category && p.date === state.recordDate && p.editingId === state.editingId));
+        n.dataset.retry = String(ready);
+        n.setAttribute("role", ready ? "button" : "status");
+        n.tabIndex = ready ? 0 : -1;
+        if (ready) n.setAttribute("aria-label", photoReady
+            ? Locale.t("点击小猫，重新分析这张照片", "Tap the cat to retry this photo")
+            : Locale.t("点击小猫，重试刚才的话", "Tap the cat to retry your last words"));
+        else n.removeAttribute("aria-label");
     }
     /**
      * 输入：title、builder、onClose、options（可选标题图标和面板类型）。
@@ -192,6 +220,13 @@ __fluffyModules["app.js"] = (() => {
      * 功能：集中切页与资源清理，输入草稿保留，退出摄像头/录音。
      */
     function navigate(scene, options = {}) {
+        state.photoRead++;
+        state.photoJob = null;
+        state.photoOwned = {};
+        state.speechRetry = false;
+        state.pendingUtterance = null;
+        if ($("page-cat-notice")) $("page-cat-notice").hidden = true;
+        BubbleCopy.stop($("entry-bubble"));
         if (review?.active)
             review.leave();
         entryMenu?.close(false);
@@ -310,7 +345,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：纠错只改变本次指定字段，保留其余原值并阻止迟到响应覆盖手工输入。
      */
     async function prepareIntentDraft(text) {
-        const client = api.configured ? api : bailian;
+        const client = api;
         if (!client.configured) {
             toast(Locale.t("请先启用AI，或直接修改填写框。", "Enable AI first, or edit the fields directly."));
             return;
@@ -328,7 +363,7 @@ __fluffyModules["app.js"] = (() => {
                 ] }, controller.signal);
             if (serial !== state.serial || animation.scene !== "entry" || id !== state.category)
                 return;
-            const f = JSON.parse(r.choices?.[0]?.message?.content || "null")?.fields;
+            const f = Policy.json(r)?.fields;
             if (!f || typeof f !== "object" || Array.isArray(f))
                 throw Error("回复格式没有整理好，请再试一次。");
             const patch = {};
@@ -345,7 +380,7 @@ __fluffyModules["app.js"] = (() => {
             if (serial === state.serial && e.name !== "AbortError") {
                 state.task = null;
                 setPhase("idle");
-                toast(e.message);
+                toast(e);
             }
         }
     }
@@ -420,9 +455,6 @@ __fluffyModules["app.js"] = (() => {
                 b.setAttribute("aria-label", Locale.language() === "en" ? `${Locale.t(b.dataset.key === "bedtime" ? "入睡时间" : "醒来时间")} ${Locale.t(Number(b.dataset.part) === 0 ? "小时" : "分钟选择")}` : `${b.dataset.key === "bedtime" ? "入睡" : "醒来"}${Number(b.dataset.part) === 0 ? "小时" : "分钟"}`);
         }
         $("entry-form").querySelectorAll(".photo-tool span").forEach((n, i) => n.textContent = Locale.t(i === 0 ? "拍照" : "选择照片"));
-        const summary = $("entry-form").querySelector(".nutrition-details summary");
-        if (summary)
-            summary.textContent = Locale.t("营养信息 · 估算");
         const placeholder = $("photo-preview")?.querySelector(".photo-empty span");
         if (placeholder)
             placeholder.textContent = Locale.t("等待照片");
@@ -457,7 +489,7 @@ __fluffyModules["app.js"] = (() => {
         if (review)
             review.lang = Locale.language();
         applyEntryLanguage();
-        bubble(state.bubbleText || Catalog.category(state.category).greeting);
+        bubble(state.bubbleText || Catalog.category(state.category).greeting, state.bubbleError || false, state.bubbleContext || {});
         homeBubble("home");
         board?.update();
         updateHomeStats();
@@ -748,7 +780,7 @@ __fluffyModules["app.js"] = (() => {
         state.versions = {};
         $("entry-panel").scrollTop = 0;
         $("entry-heading").querySelector("h1").textContent = Locale.title(state.category, state.recordDate !== Sleep.dateKey());
-        // 阶段二：照片相关入口仅给饮食/面部；点击分析前不联网。
+        // 阶段二：饮食选图即分析；面部维持手动分析。仅用户新选照片触发自动上传。
         if (def.photo) {
             const preview = el("div", "photo-preview");
             preview.id = "photo-preview";
@@ -764,17 +796,19 @@ __fluffyModules["app.js"] = (() => {
                 tools.append(b);
             }
             form.append(tools);
-            const analyze = el("button", "analyze-photo");
-            analyze.type = "button";
-            analyze.id = "analyze-photo";
-            analyze.hidden = true;
-            analyze.innerHTML = icon("sparkle");
-            analyze.append(el("span", "", "让小猫看看"));
-            analyze.onclick = analyzePhoto;
-            form.append(analyze);
+            if (state.category !== "food") {
+                const analyze = el("button", "analyze-photo");
+                analyze.type = "button";
+                analyze.id = "analyze-photo";
+                analyze.hidden = true;
+                analyze.innerHTML = icon("sparkle");
+                analyze.append(el("span", "", "让小猫看看"));
+                analyze.onclick = () => analyzePhoto(true);
+                form.append(analyze);
+            }
             showPhoto(null);
         }
-        // 阶段三：主字段与可折叠营养字段使用同一校验定义。
+        // 阶段三：同一字段模型，营养输入直接平铺为表单子项；不再创建折叠分组。
         const note = el("div", "ai-draft-note");
         note.id = "draft-note";
         note.hidden = true;
@@ -794,15 +828,9 @@ __fluffyModules["app.js"] = (() => {
                 form.append(makeField(f, values[f.key]));
             }
         });
-        if (def.fields.some(f => f.group)) {
-            const details = el("details", "nutrition-details"), summary = el("summary", "", "营养信息 · 估算"), grid = el("div", "nutrition-fields");
-            details.append(summary, grid);
-            details.open = true;
-            def.fields.filter(f => f.group).forEach(f => {
-                state.versions[f.key] = 0;
-                grid.append(makeField(f, values[f.key]));
-            });
-            form.append(details);
+        for (const f of def.fields.filter(f => f.group)) {
+            state.versions[f.key] = 0;
+            form.append(makeField(f, values[f.key]));
         }
         if (def.photo) {
             const last = def.fields.find(f => f.key === "notes");
@@ -835,7 +863,7 @@ __fluffyModules["app.js"] = (() => {
         showErrors(checked.errors);
         if (!checked.ok) {
             const key = Object.keys(checked.errors)[0];
-            bubble(checked.errors[key], true);
+            bubble(checked.errors[key], true, { field: key, invalid: Boolean(String(rawForm()[key] ?? "").trim()) });
             const input = $(`field-${key}`);
             if (state.category === "sleep" && ["bedtime", "wakeTime"].includes(key)) {
                 timeRange?.element.scrollIntoView({ block: "nearest" });
@@ -961,6 +989,7 @@ __fluffyModules["app.js"] = (() => {
         state.phase = phase;
         if (phase === "idle")
             refreshEntryCompletion();
+        updateSpeechRetry();
         animation.entryMode = phase === "thinking" ? "thinking" : ["listening", "requesting"].includes(phase) ? "listening" : "idle";
         $("confirm-entry").classList.toggle("holding", phase === "listening");
         $("confirm-entry").dataset.pending = String(phase === "thinking");
@@ -974,6 +1003,8 @@ __fluffyModules["app.js"] = (() => {
      * 功能：取消所有迟到请求并释放麦克风；用户草稿保持不变。
      */
     function cancelWork(announce = true) {
+        if (state.photoJob?.status === "running") state.photoJob.status = "canceled";
+        $("photo-preview")?.setAttribute("aria-busy", "false");
         state.serial++;
         state.task?.abort();
         state.task = null;
@@ -986,7 +1017,7 @@ __fluffyModules["app.js"] = (() => {
         if (animation.scene === "entry") {
             setPhase("idle");
             if (announce)
-                bubble("已取消，填过的内容还在。");
+                bubble("已取消，填过的内容还在。", false, { photoRetry: Boolean(currentPhotoJob()) });
         }
     }
     /**
@@ -997,23 +1028,21 @@ __fluffyModules["app.js"] = (() => {
     async function beginSpeech() {
         if (animation.scene !== "entry" || state.phase !== "idle")
             return;
-        const useAudio = bailian.configured;
-        if (state.category === "mood" && !useAudio) {
-            bubble("先启用百炼，让我听懂话里的语气。", true);
-            bailianSettings.open();
-            return;
-        }
-        if (!useAudio && !api.configured) {
-            bubble("先在右上角启用一个 AI 服务。", true);
+        if (!api.configured) {
+            gesture?.disarm();
             openSettings();
+            bubble("deepseek-key", true);
             return;
         }
-        activeSpeech = useAudio ? rawAudio : speech;
-        state.voiceBackend = useAudio ? "audio" : "text";
-        if (!activeSpeech.supported()) {
-            bubble(useAudio ? "浏览器暂不能录音，可以直接填写。" : "语音转写不可用，可启用百炼直接听录音。", true);
+        activeSpeech = speech;
+        state.voiceBackend = "text";
+        if (!speech.supported()) {
+            gesture?.disarm();
+            bubble("speech-unsupported", true);
             return;
         }
+        state.pendingUtterance = null;
+        state.speechRetry = false;
         cancelWork(false);
         const serial = state.serial;
         setPhase("requesting");
@@ -1045,7 +1074,7 @@ __fluffyModules["app.js"] = (() => {
         }
         catch (error) {
             if (serial === state.serial)
-                voiceFailed(error.name === "NotAllowedError" ? "麦克风没有被允许。" : error.message);
+                voiceFailed(error.name === "NotAllowedError" ? "麦克风没有被允许。" : error);
         }
     }
     /**
@@ -1074,7 +1103,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：展示真实转写。
      */
     function receivedSpeech(text) {
-        $("speech-transcript").textContent = text || "慢慢说，我在听。";
+        $("speech-transcript").textContent = text || Locale.t("慢慢说，我在听。", "Take your time. I am listening.");
     }
     /**
      * 输入：message。
@@ -1091,59 +1120,93 @@ __fluffyModules["app.js"] = (() => {
      * 功能：松手后终止录音，实际整理成可修改草稿，等待用户确认。
      */
     async function releaseSpeech() {
-        if (state.phase === "authorizing")
-            return;
-        if (state.phase === "requesting") {
-            cancelWork(false);
-            return;
-        }
-        if (state.phase !== "listening")
-            return;
-        const serial = state.serial, version = { ...state.voiceVersions }, id = state.category, recordDate = state.recordDate, session = activeSpeech;
+        if (state.phase === "authorizing") return;
+        if (state.phase === "requesting") { cancelWork(false); return; }
+        if (state.phase !== "listening") return;
+        const serial = state.serial, pending = { category: state.category, date: state.recordDate, editingId: state.editingId, versions: { ...state.voiceVersions }, text: "", interim: false };
         setPhase("thinking");
         bubble("听到了，我整理一下。");
         try {
-            const result = await session.stop();
+            const result = await speech.stop();
             animation.level = 0;
-            if (serial !== state.serial || result.canceled)
-                return;
-            if (!result.text && !result.audio)
-                throw Error("没有听清，长按再说一次吧。");
-            const controller = state.task = new AbortController();
-            const draft = result.audio ? await AI.extractAudio(bailian, id, result.audio, JSON.stringify(rawForm()), controller.signal, { recordDate }) : await AI.extract(api, id, result.text, null, controller.signal, { recordDate });
-            // 接口完成即释放本次原始音频引用，历史记录只存用户确认的字段。
-            result.audio = null;
-            if (serial !== state.serial || id !== state.category)
-                return;
-            const utterance = result.text || draft.transcript || "";
-            const proposed = await Intent.infer(utterance, { category: id, date: recordDate, editingId: state.editingId }, api.configured ? api : bailian, controller.signal);
-            if (serial !== state.serial || id !== state.category)
-                return;
+            if (serial !== state.serial || result.canceled) return;
+            if (!result.text?.trim()) throw new Policy.AIError("speech-empty", "没有收到听写文本。");
+            pending.text = result.text.trim();
+            pending.interim = Boolean(result.interim || result.interrupted);
+            state.pendingUtterance = pending;
+            await organizeWords(pending, serial);
+        } catch (error) {
+            if (serial === state.serial && error.name !== "AbortError") voiceFailed(error);
+        }
+    }
+    /**
+     * 输入：pending（转写文字、字段版本、记录上下文）、serial（本次请求代次）。
+     * 输出：Promise<void>。
+     * 功能：DeepSeek只处理独立ASR文本；API失败保留原话供显式重试，成功也不自动保存。
+     */
+    async function organizeWords(pending, serial) {
+        const controller = state.task = new AbortController();
+        try {
+            // 阶段一：路由和上下文固定，百炼Key不会改变普通语音的供应商。
+            Policy.language(api);
+            const draft = await AI.extract(api, pending.category, pending.text, null, controller.signal, { recordDate: pending.date });
+            if (serial !== state.serial || pending.category !== state.category || pending.date !== state.recordDate || pending.editingId !== state.editingId) return;
+            const proposed = await Intent.infer(pending.text, { category: pending.category, date: pending.date, editingId: pending.editingId }, api, controller.signal);
+            if (serial !== state.serial || controller.signal.aborted) return;
             state.task = null;
-            const intentConflict = proposed.scopeChanged || proposed.operation === "ask" || proposed.operation === "edit" && !state.editingId || proposed.operation === "add" && Boolean(state.editingId);
-            if (intentConflict) {
+            state.speechRetry = false;
+            // 阶段二：语音中的新增/修改冲突需要确认，不能让模型直接覆盖旧条目。
+            const conflict = proposed.scopeChanged || proposed.operation === "ask" || proposed.operation === "edit" && !state.editingId || proposed.operation === "add" && Boolean(state.editingId);
+            if (conflict) {
                 setPhase("idle");
-                offerIntent(utterance, id, recordDate, proposed, draft.fields);
+                offerIntent(pending.text, pending.category, pending.date, proposed, draft.fields);
+                state.pendingUtterance = null;
                 return;
             }
-            state.source = "voice";
+            state.source = pending.source || "voice";
             state.estimated = draft.estimated;
-            const protectedCount = fillForm(draft.fields, version);
-            if (id === "sleep" && version.bedtime === state.versions.bedtime && version.wakeTime === state.versions.wakeTime)
+            const protectedCount = fillForm(draft.fields, pending.versions);
+            if (pending.category === "sleep" && pending.versions.bedtime === state.versions.bedtime && pending.versions.wakeTime === state.versions.wakeTime)
                 state.sleepDates = draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate ? {} : draft.sleepDates || {};
-            if (id === "sleep" && draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate)
-                draft.warnings.push(Locale.t("语音里提到另一个日期，请在菜单里核对记录日期。", "Your words mention a different date. Check Record date in the menu."));
+            if (pending.category === "sleep" && draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate) draft.warnings.push("date-check");
+            if (pending.interim) draft.warnings.push("speech-partial");
+            if (protectedCount) draft.warnings.push("manual-kept");
             state.emotionDraft = draft.emotion || null;
-            if (protectedCount)
-                draft.warnings.push("已保留你刚才手动修改的内容。");
+            // 阶段三：全部空字段不是成功；部分有效字段仍进入可编辑草稿，不因缺备注丢弃。
+            const meaningful = Object.values(draft.fields).some(v => v !== null && String(v).trim());
             setPhase("idle");
-            showDraft(draft.warnings);
-            bubble("写在框里了，确认后交给我记录。");
+            state.pendingUtterance = null;
+            showDraft(meaningful ? draft.warnings : ["nothing-extracted"]);
+        } catch (error) {
+            if (serial !== state.serial || error.name === "AbortError") return;
+            state.task = null;
+            setPhase("idle");
+            state.pendingUtterance = pending;
+            state.speechRetry = true;
+            bubble(error, true, { followup: "retry" });
+        } finally {
+            if (state.task === controller) state.task = null;
+            updateSpeechRetry();
         }
-        catch (e) {
-            if (serial === state.serial && e.name !== "AbortError")
-                voiceFailed(e.message);
+    }
+    /**
+     * 输入：无，读取仅在内存中的上次转写。
+     * 输出：Promise<void>。
+     * 功能：失败后由用户点击小猫显式重试；提交中再次点击不发送第二个请求。
+     */
+    async function retryWords() {
+        if (state.bubbleContext?.photoRetry && currentPhotoJob()) {
+            await analyzePhoto(true);
+            return;
         }
+        const p = state.pendingUtterance;
+        if (!p || !state.speechRetry || state.phase !== "idle" || p.category !== state.category || p.date !== state.recordDate || p.editingId !== state.editingId) return;
+        if (!api.configured) { openSettings(); bubble("deepseek-key", true); return; }
+        state.speechRetry = false;
+        const serial = ++state.serial;
+        setPhase("thinking");
+        bubble("thinking");
+        await organizeWords(p, serial);
     }
     /**
      * 输入：warnings。
@@ -1152,21 +1215,11 @@ __fluffyModules["app.js"] = (() => {
      */
     function showDraft(warnings = []) {
         const note = $("draft-note");
-        // 专注页不显示成功说明面板；真实异常或须核对信息仍用短暂提示告知。
-        if (state.category === "focus") {
-            if (note) {
-                note.hidden = true;
-                note.textContent = "";
-            }
-            if (warnings.length)
-                toast(warnings.join(" "));
-            return;
-        }
-        if (note) {
-            note.hidden = false;
-            note.textContent = warnings.length ? warnings.map(Locale.message).join(" ") : Locale.t("整理好了，请核对。");
-            $("entry-panel").scrollTop = 0;
-        }
+        if (note) { note.hidden = true; note.textContent = ""; }
+        if (warnings.length) {
+            // 先说最可操作的一条，不暴露供应商正文；字段本身仍可完整核对。
+            bubble(warnings[0], true, { followups: warnings.slice(1, 4) });
+        } else bubble("ready");
     }
     /**
      * 输入：无。
@@ -1178,14 +1231,16 @@ __fluffyModules["app.js"] = (() => {
             return;
         if (!api.configured) {
             openSettings();
+            bubble("deepseek-key", true);
             return;
         }
         const data = rawForm();
         if (!data.task.trim()) {
-            bubble("先写下想做的事情。", true);
+            bubble("先写下想做的事情。", true, { field: "task" });
             return;
         }
         const serial = ++state.serial, version = { ...state.versions }, controller = state.task = new AbortController();
+        setPhase("thinking");
         bubble("让我把时间估得实际一点。");
         try {
             const result = await AI.estimate(api, data.task, data.notes || "", controller.signal);
@@ -1200,17 +1255,16 @@ __fluffyModules["app.js"] = (() => {
         }
         catch (e) {
             if (serial === state.serial && e.name !== "AbortError")
-                bubble(e.message, true);
+                bubble(e, true);
         }
         finally {
-            if (serial === state.serial)
-                state.task = null;
+            if (serial === state.serial) { state.task = null; setPhase("idle"); }
         }
     }
     /**
      * 输入：image（经过重编码的 JPEG）。
      * 输出：无。
-     * 功能：显示照片缩略图，尚不上传；等待用户主动点分析。
+     * 功能：按原比例显示照片；本函数不联网，上传仅由本轮用户选图/拍摄入口触发。
      */
     function showPhoto(image) {
         const preview = $("photo-preview");
@@ -1219,7 +1273,7 @@ __fluffyModules["app.js"] = (() => {
         preview.replaceChildren();
         preview.hidden = false;
         preview.classList.toggle("has-image", Boolean(image));
-        $("analyze-photo").hidden = !image;
+        if ($("analyze-photo")) $("analyze-photo").hidden = !image;
         if (!image) {
             preview.style.height = state.category === "face" ? "165px" : "96px";
             formLayout?.schedule();
@@ -1245,7 +1299,7 @@ __fluffyModules["app.js"] = (() => {
         const clear = el("button", "photo-remove", Locale.t("移除", "Remove"));
         clear.type = "button";
         clear.setAttribute("aria-label", Locale.t("移除照片"));
-        clear.onclick = () => { cancelWork(false); photo.clear(); showPhoto(null); };
+        clear.onclick = removePhoto;
         preview.append(img, clear);
         requestAnimationFrame(fitPhoto);
     }
@@ -1256,6 +1310,8 @@ __fluffyModules["app.js"] = (() => {
      */
     async function openCamera() {
         const id = state.category;
+        cancelWork(false);
+        const serial = state.serial;
         let status;
         showSheet("拍一张照片", b => {
             cameraVideo = el("video", "camera-video");
@@ -1269,12 +1325,14 @@ __fluffyModules["app.js"] = (() => {
             const capture = el("button", "solid", Locale.t("拍下这一张")), pick = el("button", "", Locale.t("选择照片"));
             capture.onclick = () => {
                 try {
+                    if (serial !== state.serial || id !== state.category || animation.scene !== "entry") return;
                     const image = photo.capture(cameraVideo);
                     closeSheet();
-                    showPhoto(image);
+                    acceptPhoto(image);
                 }
                 catch (e) {
-                    status.textContent = e.message;
+                    closeSheet(false);
+                    bubble(e, true);
                 }
             };
             pick.onclick = () => {
@@ -1290,46 +1348,153 @@ __fluffyModules["app.js"] = (() => {
                 status.textContent = "";
         }
         catch (e) {
-            if (!$("sheet-layer").hidden)
-                status.textContent = e.name === "NotAllowedError" ? "摄像头未获允许，也可以选择照片。" : e.message;
+            if (!$("sheet-layer").hidden && id === state.category) {
+                closeSheet(false);
+                bubble(e.name === "NotAllowedError" ? "camera-permission" : "camera-device", true);
+            }
         }
     }
     /**
-     * 输入：无。
-     * 输出：Promise<void>。
-     * 功能：用户明确分析后才实际发照片；结果是可改估计/观察，不作医疗判断。
+     * 输入：无，读取当前任务和页面上下文。
+     * 输出：boolean，当前照片是否仍属于本次记录。
+     * 功能：验证图片、类别、日期和编辑身份，避免跨页、跨日或旧照片回填。
      */
-    async function analyzePhoto() {
-        if (!photo.image || state.phase !== "idle")
-            return;
-        if (!bailian.configured) {
-            bailianSettings.open();
+    function currentPhotoJob() {
+        const job = state.photoJob;
+        return Boolean(job && animation.scene === "entry" && job.image === photo.image
+            && job.category === state.category && job.date === state.recordDate && job.editingId === state.editingId);
+    }
+    /**
+     * 输入：无，读取照片字段所有权。
+     * 输出：无。
+     * 功能：只清除上一张照片自动填入且未被手动修改的项目，不影响已保存记录。
+     */
+    function clearPhotoFields() {
+        for (const key of PhotoDraft.staleKeys(rawForm(), state.versions, state.photoOwned)) {
+            const input = $(`field-${key}`);
+            if (!input) continue;
+            input.value = "";
+            input.setAttribute("aria-invalid", "false");
+            updateFieldDisplay(Catalog.category(state.category).fields.find(f => f.key === key), input);
+        }
+        state.photoOwned = {};
+        preserveDraft();
+    }
+    /**
+     * 输入：无。
+     * 输出：无。
+     * 功能：移除照片并中止本轮分析；保护手动修改，旧响应不得再次出现。
+     */
+    function removePhoto() {
+        cancelWork(false);
+        state.photoRead++;
+        if (state.category === "food") clearPhotoFields();
+        state.photoJob = null;
+        photo.clear();
+        showPhoto(null);
+        bubble(Catalog.category(state.category).greeting);
+    }
+    /**
+     * 输入：image（用户新选择/拍摄并重编码后的JPEG）。
+     * 输出：Promise<void>。
+     * 功能：显示新照片；饮食自动分析一次，面部维持原来的手动分析流程。
+     */
+    async function acceptPhoto(image) {
+        if (!image || animation.scene !== "entry" || !Catalog.category(state.category).photo) return;
+        // 阶段一：相同已完成图片不重复扣费；渲染、缩放和语言切换不调用此函数。
+        if (state.category === "food" && state.photoJob?.image === image && state.photoJob.status === "done" && currentPhotoJob() && state.photoJob.lastForm === JSON.stringify(rawForm())) {
+            showPhoto(image);
             return;
         }
-        const image = photo.image, id = state.category, version = { ...state.versions }, text = JSON.stringify(rawForm()), serial = ++state.serial, controller = state.task = new AbortController();
-        setPhase("thinking");
-        $("speech-transcript").textContent = "我正在看照片，也会参考你填写的内容。";
-        bubble("我看看，再一起核对。");
+        cancelWork(false);
+        if (state.category === "food") clearPhotoFields();
+        photo.image = image;
+        state.pendingUtterance = null;
+        state.speechRetry = false;
+        state.photoJob = { image, category: state.category, date: state.recordDate, editingId: state.editingId, status: "selected" };
+        showPhoto(image);
+        // 阶段二：只对这一轮明确的新选图自动调用，不自动保存记录或推断餐次。
+        if (state.category === "food") await analyzePhoto();
+    }
+    /**
+     * 输入：显式文件选择事件。
+     * 输出：Promise<void>。
+     * 功能：读取成功才换图；连续选图、切页及清除期间的迟到解码不会提交请求。
+     */
+    async function selectPhotoFile(event) {
+        const input = event.target, file = input.files?.[0];
+        if (!file) return;
+        cancelWork(false);
+        const read = ++state.photoRead, serial = state.serial, id = state.category;
         try {
-            const draft = await AI.extract(bailian, id, text, image, controller.signal, { recordDate: state.recordDate });
-            if (serial !== state.serial || id !== state.category || photo.image !== image)
-                return;
-            fillForm(draft.fields, version);
+            const image = await photo.readFile(file);
+            if (read !== state.photoRead || serial !== state.serial || id !== state.category || animation.scene !== "entry") return;
+            if (image) await acceptPhoto(image);
+        } catch (error) {
+            if (read === state.photoRead && serial === state.serial && id === state.category && animation.scene === "entry") bubble(error, true);
+        } finally {
+            // 晚到的读取不能清掉用户刚选择的另一个文件。
+            if (read === state.photoRead) input.value = "";
+        }
+    }
+    /**
+     * 输入：force（用户点击气泡/原面部按钮的显式重试）。
+     * 输出：Promise<void>。
+     * 功能：百炼视觉回填可编辑字段；保留手动值、取消保护和失败后点击小猫重试。
+     */
+    async function analyzePhoto(force = false) {
+        if (!photo.image || state.phase !== "idle" || animation.scene !== "entry") return;
+        if (!currentPhotoJob()) state.photoJob = { image: photo.image, category: state.category, date: state.recordDate, editingId: state.editingId, status: "selected" };
+        const job = state.photoJob;
+        if (job.status === "done" && !force) return;
+        if (!bailian.configured) {
+            job.status = "waiting-key";
+            bubble("bailian-key", true, { photoRetry: true });
+            return;
+        }
+        // 阶段一：固定照片与字段版本；表单一直可见且可编辑，只有小猫进入思考。
+        const image = job.image, id = job.category, version = { ...state.versions }, text = JSON.stringify(rawForm());
+        const serial = ++state.serial, controller = state.task = new AbortController();
+        job.status = "running";
+        setPhase("thinking");
+        $("photo-preview")?.setAttribute("aria-busy", "true");
+        bubble("photo");
+        try {
+            const draft = await AI.extract(bailian, id, text, image, controller.signal, { recordDate: job.date });
+            if (controller.signal.aborted || serial !== state.serial || state.photoJob !== job || !currentPhotoJob()) return;
+            // 阶段二：自动分析不覆盖上传前已有值；更新途中手动改写或清空的字段同样优先。
+            const next = id === "food" ? PhotoDraft.writable(draft.fields, rawForm(), state.versions, version, state.photoOwned)
+                : { fields: draft.fields, protectedCount: 0 };
+            fillForm(next.fields, version);
+            if (id === "food") state.photoOwned = PhotoDraft.remember(next.fields, rawForm(), state.versions, state.photoOwned);
             state.source = "photo";
             state.estimated = draft.estimated;
+            job.status = "done";
+            job.lastForm = JSON.stringify(rawForm());
             setPhase("idle");
-            showDraft(draft.warnings);
-            bubble("只记下看得清的部分，你再看看。");
-        }
-        catch (e) {
-            if (serial === state.serial && e.name !== "AbortError") {
+            // 阶段三：不显示黄色说明或反复告知估算；看不清的具体缺项只由小猫短句询问。
+            if (id === "food") {
+                const meaningful = ["foods", "portion", "calories", "protein", "carbs", "fat"].some(k => draft.fields[k] != null && draft.fields[k] !== "");
+                if (!meaningful) {
+                    job.status = "needs-info";
+                    bubble("photo-food-unclear", true, { photoRetry: true });
+                } else if (["calories", "protein", "carbs", "fat"].some(k => String(rawForm()[k] ?? "").trim() === "")) {
+                    job.status = "needs-info";
+                    bubble("photo-food-partial", true, { photoRetry: true, followup: "photo-retry" });
+                } else bubble("photo-filled");
+            } else showDraft(draft.warnings);
+        } catch (error) {
+            if (serial === state.serial && state.photoJob === job && currentPhotoJob() && error.name !== "AbortError") {
+                job.status = "failed";
                 setPhase("idle");
-                bubble(e.message, true);
+                bubble(error, true, { photoRetry: true, followup: "photo-retry" });
             }
-        }
-        finally {
-            if (serial === state.serial)
+        } finally {
+            if (serial === state.serial) {
                 state.task = null;
+                $("photo-preview")?.setAttribute("aria-busy", "false");
+                updateSpeechRetry();
+            }
         }
     }
     /**
@@ -1731,35 +1896,20 @@ __fluffyModules["app.js"] = (() => {
                     input.focus();
                     return;
                 }
-                if (!api.configured && !bailian.configured) {
+                if (!api.configured) {
+                    closeSheet(false);
                     openSettings();
+                    toast("deepseek-key");
                     return;
                 }
                 closeSheet(false);
                 openEntry(selected);
-                const serial = ++state.serial, controller = state.task = new AbortController();
+                const serial = ++state.serial, pending = { category: selected, date: state.recordDate, editingId: state.editingId, versions: { ...state.versions }, text, interim: false, source: "text-ai" };
+                state.pendingUtterance = pending;
                 setPhase("thinking");
+                bubble("thinking");
                 $("speech-transcript").textContent = text;
-                try {
-                    const draft = await AI.extract(api.configured ? api : bailian, selected, text, null, controller.signal, { recordDate: state.recordDate });
-                    if (serial !== state.serial)
-                        return;
-                    fillForm(draft.fields);
-                    if (selected === "sleep")
-                        state.sleepDates = draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate ? {} : draft.sleepDates || {};
-                    if (selected === "sleep" && draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate)
-                        draft.warnings.push(Locale.t("描述里提到另一个日期，请在菜单里核对记录日期。", "Your words mention a different date. Check Record date in the menu."));
-                    state.emotionDraft = draft.emotion || null;
-                    state.source = "text-ai";
-                    state.estimated = draft.estimated;
-                    setPhase("idle");
-                    showDraft(draft.warnings);
-                    bubble("整理好了，确认后我来写。");
-                }
-                catch (e) {
-                    if (serial === state.serial && e.name !== "AbortError")
-                        voiceFailed(e.message);
-                }
+                await organizeWords(pending, serial);
             };
             row.append(voice, send);
             b.append(row);
@@ -1821,7 +1971,7 @@ __fluffyModules["app.js"] = (() => {
             if (serial !== state.keySerial || controller.signal.aborted)
                 return;
             if (!models.includes(candidate.model))
-                throw Error("当前 Key 暂时不能访问该模型。");
+                throw new Policy.AIError("ai-model", "当前 Key 暂时不能访问该模型。");
             api.setKey(key);
             Display.retry();
             Display.warm(Store.records().slice(0, 30));
@@ -1831,7 +1981,7 @@ __fluffyModules["app.js"] = (() => {
         }
         catch (e) {
             if (serial === state.keySerial && e.name !== "AbortError")
-                $("api-feedback").textContent = e.message;
+                toast(e);
         }
         finally {
             candidate.clear();
@@ -2047,10 +2197,13 @@ __fluffyModules["app.js"] = (() => {
     function bind() {
         // 阶段一：首页、短按和长按各自绑定，避免一手势触发两条流程。
         document.querySelectorAll("[data-icon]").forEach(n => setIcon(n, n.dataset.icon));
-        bailianSettings = new BailianSettings(bailian, CONFIG, {
-            onOpen: () => { review?.cancel(false); cancelWork(false); gesture?.disarm(); closeSettings(false); }, onClear: () => { review?.cancel(false); cancelWork(false); }
+        bailianSettings = new BailianSettings(bailian, CONFIG, { onError: error => toast(error),
+            onOpen: () => { review?.cancel(false); cancelWork(false); gesture?.disarm(); closeSettings(false); }, onClear: () => { review?.cancel(false); cancelWork(false); },
+            onEnabled: () => {
+                if (currentPhotoJob() && state.photoJob.status === "waiting-key" && state.category === "food") analyzePhoto();
+            }
         });
-        Display.configure(() => api.configured ? api : bailian, () => {
+        Display.configure(() => api, () => {
             board?.update();
             if (["history", "tasks"].includes(animation.scene))
                 renderPage(animation.scene);
@@ -2172,22 +2325,7 @@ __fluffyModules["app.js"] = (() => {
             }
         });
         // 阶段三：媒体与计时操作必须由真实用户手势触发。
-        $("photo-library").onchange = async (e) => {
-            const id = state.category;
-            try {
-                if (e.target.files?.[0])
-                    cancelWork(false);
-                const image = await photo.readFile(e.target.files?.[0]);
-                if (image && id === state.category && animation.scene === "entry")
-                    showPhoto(image);
-            }
-            catch (error) {
-                toast(error.message);
-            }
-            finally {
-                e.target.value = "";
-            }
-        };
+        $("photo-library").onchange = selectPhotoFile;
         $("timer-pause").onclick = () => {
             timer.state === "running" ? timer.pause() : timer.resume();
             persistFocus();
@@ -2234,6 +2372,10 @@ __fluffyModules["app.js"] = (() => {
         });
         setInterval(checkFocus, 200);
     }
+    $("entry-bubble").addEventListener("click", retryWords);
+    $("entry-bubble").addEventListener("keydown", e => {
+        if (["Enter", " "].includes(e.key) && $("entry-bubble").dataset.retry === "true") { e.preventDefault(); retryWords(); }
+    });
     renderForm({});
     resizePhone();
     bind();
@@ -2245,7 +2387,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, review, openCategory, newEntry, chooseEntry, offerIntent, refreshEntryCompletion, synchronizeEntryAction, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, languageSheet, prepareIntentDraft, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
+            animation, state, review, retryWords, organizeWords, toast, openCategory, newEntry, chooseEntry, offerIntent, refreshEntryCompletion, synchronizeEntryAction, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, languageSheet, prepareIntentDraft, estimateTime, acceptPhoto, selectPhotoFile, analyzePhoto, removePhoto, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};

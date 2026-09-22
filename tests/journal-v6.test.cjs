@@ -11,7 +11,7 @@ function fixture() {
         AbortController, DOMException, URL, Blob, TextDecoder, TextEncoder, Response, setTimeout, clearTimeout, performance,
         localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) } });
     vm.runInContext('const __fluffyModules={};', ctx);
-    for (const file of ['model.js','sleep-time.js','catalog.js','journal-store.js','home-board.js','ai-journal.js','bubble-copy.js'])
+    for (const file of ['model.js','sleep-time.js','catalog.js','journal-store.js','home-board.js','ai-journal.js','cat-feedback.js','bubble-copy.js'])
         vm.runInContext(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'), ctx, { filename: file });
     return { module: name => vm.runInContext(`__fluffyModules["${name}.js"]`, ctx), storage };
 }
@@ -84,9 +84,9 @@ test('气泡与六类问候只用完整一行或长度平衡的两行',()=>{
     const texts=[...Object.values(Bubble.COPY),...Object.values(C.CATEGORIES).map(c=>c.greeting)];
     for(const text of texts){const lines=text.split('\n');assert.ok(lines.length<=2);assert.ok(lines.every(line=>[...line].length<=7));if(lines.length===2) assert.ok(Math.abs([...lines[0]].length-[...lines[1]].length)<=1,text);}
 });
-test('错误文案不会被写成整理成功，也不丢详细故障信息',()=>{
-    const result=Bubble.prepare('麦克风权限被拒绝，请先在网站设置允许麦克风。',true);
-    assert.equal(result.text,Bubble.COPY.error);assert.ok(result.detail.includes('麦克风权限'));
+test('v12麦克风故障直接在气泡说明原因，不另传toast正文',()=>{
+ const result=Bubble.prepare('麦克风权限被拒绝，请先在网站设置允许麦克风。',true);
+ assert.ok(result.text.includes('允许麦克风'));assert.ok(!result.text.includes('下方'));assert.equal(result.detail,'');
 });
 test('成功估时简短陪伴，不重复暗示不可靠',()=>{
     const result=Bubble.prepare('estimated');assert.equal(result.text,'时间安排好啦\n我们一起开始');assert.equal(result.detail,'');

@@ -36,18 +36,18 @@ __fluffyModules["photo-input.js"] = (() => {
                     return null;
                 if (img.naturalWidth * img.naturalHeight > 60e6 || !img.naturalWidth)
                     throw Error("图片分辨率过高，请先缩小。");
-                return this.encode(img, img.naturalWidth, img.naturalHeight);
+                return this.encode(img, img.naturalWidth, img.naturalHeight, false);
             }
             finally {
                 URL.revokeObjectURL(url);
             }
         }
         /**
-         * 输入：source、width、height。
+         * 输入：source、width、height、adopt（是否设为当前照片）。
          * 输出：JPEG data URL。
          * 功能：长边限制为 1280，剥离 EXIF 与位置元数据。
          */
-        encode(source, width, height) {
+        encode(source, width, height, adopt = true) {
             const s = Math.min(1, 1280 / Math.max(width, height)), c = document.createElement("canvas");
             c.width = Math.round(width * s);
             c.height = Math.round(height * s);
@@ -55,8 +55,9 @@ __fluffyModules["photo-input.js"] = (() => {
             ctx.fillStyle = "#fff";
             ctx.fillRect(0, 0, c.width, c.height);
             ctx.drawImage(source, 0, 0, c.width, c.height);
-            this.image = c.toDataURL("image/jpeg", .86);
-            return this.image;
+            const image = c.toDataURL("image/jpeg", .86);
+            if (adopt) this.image = image;
+            return image;
         }
         /**
          * 输入：video（预览元素）、selfie（是否前置）。

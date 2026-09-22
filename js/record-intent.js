@@ -97,7 +97,7 @@ __fluffyModules["record-intent.js"] = (() => {
      */
     async function infer(text, context, client, signal) {
         const local = classify(text, context);
-        if (!client?.configured || !entries(context.category, local.date, context.records).length || ["add", "edit"].includes(local.operation))
+        if (!client?.configured || client.provider === "bailian" || !entries(context.category, local.date, context.records).length || ["add", "edit"].includes(local.operation))
             return local;
         if (/(?:不要|别|无需|不用)(?:修改|更改|记录|保存)|\b(?:do not|don't|don’t)\s+(?:change|edit|save|record)\b/i.test(text))
             return local;
@@ -111,7 +111,7 @@ __fluffyModules["record-intent.js"] = (() => {
             const result = await client.request(client.routes.chat, payload, signal);
             if (signal?.aborted)
                 throw new DOMException("Canceled", "AbortError");
-            const proposal = validateProposal(JSON.parse(result.choices?.[0]?.message?.content || "null"), rows);
+            const proposal = validateProposal(__fluffyModules["ai-policy.js"] ? __fluffyModules["ai-policy.js"].json(result) : JSON.parse(result.choices?.[0]?.message?.content || "null"), rows);
             // 明确提出过纠错但对象有歧义时，不让模型的 none 抹去确认入口。
             if (local.operation === "ask" && proposal.operation === "none")
                 return local;

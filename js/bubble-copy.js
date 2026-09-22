@@ -1,4 +1,4 @@
-/* 小猫对白只承载短句；详细错误仍由 toast 保留，不把长段报告塞入气泡。 */
+/* 小猫气泡是唯一提示出口：错误用温柔、准确的本地对白；不另显示底部条。 */
 __fluffyModules["bubble-copy.js"] = (() => {
     "use strict";
     const COPY = Object.freeze({
@@ -13,7 +13,7 @@ __fluffyModules["bubble-copy.js"] = (() => {
         estimating: "我来排排时间\n陪你专心做好",
         estimated: "时间安排好啦\n我们一起开始",
         photo: "让我仔细看看\n记下清楚的事",
-        error: "遇到小问题啦\n看看下方提示",
+        error: "这次没能接上\n内容还在这里",
         saved: "今天也辛苦啦\n都替你记好啦",
         focusAway: "时间还在走呀\n随时回来找我"
     });
@@ -32,38 +32,72 @@ __fluffyModules["bubble-copy.js"] = (() => {
         "记下来了，今天也辛苦啦。": "saved",
         "计时仍在继续，随时回来。": "focusAway"
     });
+    const players = new WeakMap();
     /**
-     * 输入：text（语义键或受控对白）、error（是否错误）。
-     * 输出：{text, detail}；text 为一至两行短句，detail 为须另外展示的完整信息。
-     * 功能：固定对白显式平衡换行；动态长错误不缩字、不丢失，也不扩张气泡。
+     * 输入：text（状态或错误）、error、context（校验字段和语言）。
+     * 输出：{text, detail}，detail始终为空。
+     * 功能：错误直接变成小猫对白，不再让用户去找下方提示条。
      */
-    function prepare(text, error = false) {
-        const original = String(text || "").trim();
-        const key = ALIASES[original] || original;
-        if (COPY[key]) return { text: COPY[key], detail: "" };
+    function prepare(text, error = false, context = {}) {
+        const original = String(text?.message ?? text ?? "").trim(), key = ALIASES[original] || original;
+        const locale = __fluffyModules["entry-i18n.js"], F = __fluffyModules["cat-feedback.js"];
+        if (error || context.field) return { text: F.say(text, context), detail: "" };
+        if (COPY[key]) return { text: locale?.language() === "en" ? locale.bubble(key, COPY[key]) : COPY[key], detail: "" };
         const lines = original.split("\n");
-        // 阶段一：受控双行以自然语义断句，不做拉大字距的强制两端对齐。
-        if (!error && lines.length <= 2 && lines.every(line => [...line].length <= 7))
-            return { text: original, detail: "" };
-        // 阶段二：未知消息显示完整 toast；对白本身保持简短，不将错误伪装成成功。
-        return { text: error ? COPY.error : COPY.ready, detail: original };
+        if (lines.length <= 2 && lines.every(line => [...line].length <= 8))
+            return { text: locale?.language() === "en" ? locale.bubble(key, original) : original, detail: "" };
+        return { text: F.say(text, context), detail: "" };
     }
     /**
-     * 输入：node（气泡元素）、text、error。
-     * 输出：须由外层展示的完整消息，或空串。
-     * 功能：仅用 textContent 更新对白，避免来自模型/错误信息的 HTML 注入。
+     * 输入：node（一个小猫气泡）。
+     * 输出：无。
+     * 功能：停止旧的分页计时，新动作和新错误不会被旧提示盖回去。
      */
-    function render(node, text, error = false) {
-        const copy = prepare(text, error);
-        node.textContent = copy.text;
-        node.classList.toggle("error", error);
-        node.dataset.lines = String(copy.text.split("\n").length);
-        const locale = __fluffyModules["entry-i18n.js"];
-        if(locale?.language()==="en") {
-            node.textContent=locale.bubble(ALIASES[String(text||"").trim()]||String(text||"").trim(),copy.text);
-            node.dataset.lines=String(node.textContent.split("\n").length);
-        }
-        return copy.detail;
+    function stop(node) {
+        const old = players.get(node);
+        if (old) clearTimeout(old.timer);
+        players.delete(node);
     }
-    return { COPY, prepare, render };
+    /**
+     * 输入：node、text/error、context。
+     * 输出：空串，调用方无需再展示任何旁路提示。
+     * 功能：根据真实气泡宽度显示完整短句；过长英文分成小页逐句说，最后一页保留。
+     */
+    function render(node, text, error = false, context = {}) {
+        stop(node);
+        const copy = prepare(text, error, context), Talk = __fluffyModules["review-conversation.js"];
+        const content = [copy.text];
+        for (const key of [context.followup, ...(context.followups || [])].filter(Boolean))
+            content.push(__fluffyModules["cat-feedback.js"].say(key, context));
+        let measure = null, width = 0;
+        if (typeof getComputedStyle === "function" && Talk) {
+            const style = getComputedStyle(node), c = document.createElement("canvas").getContext("2d");
+            if (c) {
+                c.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+                width = Math.max(node.clientWidth, parseFloat(style.maxWidth) || 0) - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 4;
+                measure = str => c.measureText(str).width + [...str].length * (parseFloat(style.letterSpacing) || 0);
+            }
+        }
+        const pages = [...new Set(content)].flatMap(value => {
+            const lines = value.split("\n");
+            return measure && width > 10 && lines.some(line => measure(line) > width) ? Talk.pages(value, measure, width) : [lines];
+        });
+        const player = { timer: null, index: 0, pages };
+        players.set(node, player);
+        /** 输入：无。输出：无。功能：一页最多两行，使用textContent避免注入；新提示替换即终止。 */
+        function show() {
+            if (players.get(node) !== player) return;
+            const lines = player.pages[player.index] || [copy.text];
+            node.textContent = lines.join("\n");
+            node.dataset.lines = String(lines.length);
+            node.classList.remove("error");
+            node.dataset.feedback = error ? "help" : "notice";
+            node.setAttribute("aria-live", "polite");
+            node.setAttribute("aria-atomic", "true");
+            if (player.index < player.pages.length - 1) player.timer = setTimeout(() => { player.index++; show(); }, 3700);
+        }
+        show();
+        return "";
+    }
+    return { COPY, prepare, render, stop };
 })();

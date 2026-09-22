@@ -17,6 +17,15 @@ function speechError(code) {
         "NotReadableError": "麦克风暂时不可用，可能被其他程序占用。"
     })[code] || "语音没有完成，请重新长按，或直接填写。";
 }
+/**
+ * 输入：浏览器错误码。
+ * 输出：分阶段错误对象。
+ * 功能：听写服务失败不是DeepSeek失败，不再统一说成没听清。
+ */
+function speechFault(code) {
+    const P = __fluffyModules["ai-policy.js"], key = ({"not-allowed":"speech-permission","service-not-allowed":"speech-unsupported","audio-capture":"speech-device","network":"speech-network","language-not-supported":"speech-unsupported","no-speech":"speech-empty","NotAllowedError":"speech-permission","NotFoundError":"speech-device","NotReadableError":"speech-device"})[code] || "speech-interrupted";
+    return P ? new P.AIError(key, speechError(code), {provider:"browser"}) : Error(speechError(code));
+}
 class SpeechSession {
     /**
      * 输入：callbacks（音量、转写、状态、错误、时长上限回调），env（可注入的浏览器依赖）。
@@ -38,6 +47,8 @@ class SpeechSession {
         this.finalText = "";
         this.interimText = "";
         this.settle = null;
+        this.completedResult = null;
+        this.interrupted = false;
     }
     /**
      * 输入：无。
@@ -62,10 +73,13 @@ class SpeechSession {
         this.pending = true;
         this.history.fill(0);
         this.committed = this.finalText = this.interimText = "";
+        this.completedResult = null;
+        this.interrupted = false;
+        this.interimCarry = "";
         const media = this.env.mediaDevices || navigator.mediaDevices;
         let stream;
         try { stream = await media.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
-        catch (error) { if (generation !== this.serial) return false; this.pending = false; throw Error(speechError(error.name)); }
+        catch (error) { if (generation !== this.serial) return false; this.pending = false; throw speechFault(error.name); }
         if (generation !== this.serial) { stream.getTracks().forEach(track => track.stop()); return false; }
         this.stream = stream;
         try {
@@ -109,6 +123,7 @@ class SpeechSession {
                     if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
                     else interimText += event.results[i][0].transcript;
                 }
+                this.interimCarry = "";
                 this.finalText = finalText;
                 this.interimText = interimText;
                 this.callbacks.onText?.(this.text());
@@ -116,30 +131,39 @@ class SpeechSession {
             recognition.onerror = event => {
                 if (generation !== this.serial || this.stopping && event.error === "aborted") return;
                 if (event.error === "no-speech" && this.active) return;
-                const message = speechError(event.error);
+                // 有可核对原话时保留，不因识别服务尾部断线把整段已经听到的文字抹掉。
+                if (this.text() && !["not-allowed", "service-not-allowed"].includes(event.error)) {
+                    this.interrupted = true;
+                    const wasStopping = this.stopping;
+                    this.finishResult();
+                    if (!wasStopping) this.callbacks.onLimit?.();
+                    return;
+                }
+                const fault = speechFault(event.error);
                 this.cancel();
-                this.callbacks.onError?.(message);
+                this.callbacks.onError?.(fault);
             };
             recognition.onend = () => {
                 if (generation !== this.serial) return;
                 if (this.stopping || !this.active) { this.finishResult(); return; }
                 // 静默停句后继续识别下一句，直到用户松手；已确定文本只追加一次。
-                this.committed += this.finalText;
+                this.committed += (/\w$/.test(this.committed) && /^\w/.test(this.finalText) ? " " : "") + this.finalText;
+                this.interimCarry = this.interimText;
                 this.finalText = this.interimText = "";
                 this.restartTimer = setTimeout(() => {
                     if (generation !== this.serial || !this.active) return;
-                    try { recognition.start(); } catch { this.cancel(); this.callbacks.onError?.("识别中断了，请松开后重新长按。"); }
+                    try { recognition.start(); } catch { this.cancel(); this.callbacks.onError?.(speechFault("aborted")); }
                 }, 120);
             };
             // 识别真正启动前只显示等待；请求弹出或启动失败不会冒充正在识别。
             this.startTimer = setTimeout(() => {
                 if (generation !== this.serial) return;
                 this.cancel();
-                this.callbacks.onError?.("语音服务启动超时，请再试一次。");
+                this.callbacks.onError?.(new (__fluffyModules["ai-policy.js"]?.AIError || Error)("speech-timeout", "语音服务启动超时，请再试一次。"));
             }, 15000);
             recognition.start();
             this.sampleFrame();
-            this.limitTimer = setTimeout(() => this.callbacks.onLimit?.(), (options.maximumSeconds || 90) * 1000);
+            this.limitTimer = setTimeout(() => this.callbacks.onLimit?.(), Math.min(90, Math.max(1, options.maximumSeconds || 90)) * 1000);
             return true;
         } catch (error) {
             if (generation !== this.serial) return false;
@@ -152,7 +176,7 @@ class SpeechSession {
      * 输出：本次会话已确定文字加正在识别的尾句。
      * 功能：实时展示转写，不改写用户话语。
      */
-    text() { return (this.committed + this.finalText + this.interimText).trim(); }
+    text() { return (this.committed + this.finalText + (this.interimText || this.interimCarry || "")).trim(); }
     /**
      * 输入：无，读取真实音频缓存。
      * 输出：无；推送音量和右到左滚动历史。
@@ -179,6 +203,7 @@ class SpeechSession {
      * 功能：松手立刻关闭音频流，短暂等待转写尾句；超时仍可返回已收到文本。
      */
     async stop() {
+        if (this.completedResult) { const result = this.completedResult; this.completedResult = null; return result; }
         if (this.pending) { this.cancel(); return { text: "", canceled: true }; }
         if (!this.active && !this.stopping) return { text: "", canceled: true };
         if (this.stopping) return this.resultPromise;
@@ -186,7 +211,7 @@ class SpeechSession {
         this.active = false;
         clearTimeout(this.limitTimer); clearTimeout(this.restartTimer);
         this.releaseAudio();
-        this.stopTimer = setTimeout(() => this.finishResult(), 1800);
+        this.stopTimer = setTimeout(() => this.finishResult(), this.env.stopWaitMs ?? 4000);
         try { this.recognition?.stop(); } catch { this.finishResult(); }
         return this.resultPromise;
     }
@@ -196,9 +221,12 @@ class SpeechSession {
      * 功能：只结算一次，并终止识别服务，防止松手后继续监听。
      */
     finishResult() {
-        clearTimeout(this.stopTimer);
-        const result = { text: this.text(), canceled: false, interim: Boolean(this.interimText) };
+        clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.restartTimer); clearTimeout(this.limitTimer);
+        const result = { text: this.text(), canceled: false, interim: Boolean(this.interimText || this.interimCarry), interrupted: this.interrupted };
+        this.completedResult = result;
+        this.active = false;
         this.stopping = false;
+        this.releaseAudio();
         this.detachRecognition();
         this.settle?.(result); this.settle = null;
     }
@@ -236,11 +264,12 @@ class SpeechSession {
     cancel() {
         this.serial++;
         this.pending = this.active = this.stopping = false;
+        this.completedResult = null;
         clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.limitTimer); clearTimeout(this.restartTimer);
         this.releaseAudio(); this.detachRecognition();
         this.settle?.({ text: "", canceled: true }); this.settle = null;
     }
 }
 
-return {speechError,SpeechSession};
+return {speechError,speechFault,SpeechSession};
 })();

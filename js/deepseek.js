@@ -33,6 +33,9 @@ __fluffyModules["deepseek.js"] = (() => {
          * 功能：封装官方 Chat 请求；密钥仅存于实例私有内存，不写存储、不打印日志。
          */
         constructor(options = {}) {
+            this.provider = "deepseek";
+            this.requestTimeoutMs = options.requestTimeoutMs ?? 60000;
+            this.keyVersion = 0;
             this.routes = options.routes || apiRoutes(globalThis.location || {}, options.config || {});
             this.model = options.model || "deepseek-flash";
             this.fetch = options.fetchImpl || globalThis.fetch.bind(globalThis);
@@ -53,57 +56,76 @@ __fluffyModules["deepseek.js"] = (() => {
             if (trimmed.length < 12 || trimmed.length > 256 || /\s/.test(trimmed))
                 throw Error("请填写完整的 DeepSeek API Key。");
             this.#key = trimmed;
+            this.keyVersion++;
         }
         /**
          * 输入：无。
          * 输出：无。
          * 功能：立即清空当前实例的密钥引用。
          */
-        clear() { this.#key = ""; }
+        clear() { this.#key = ""; this.keyVersion++; }
         /**
          * 输入：path（固定目标）、payload（请求体或null）、signal（外部取消信号）。
          * 输出：解析后的响应 JSON。
          * 功能：统一处理超时、取消和 HTTP 错误；只允许向指定官方/本机路由发送 Key。
          */
         async request(path, payload, signal) {
-            if (!this.configured)
-                throw Error("先在右上角填写 DeepSeek API Key，再长按说话。");
-            if (!Object.values(this.routes).includes(path))
-                throw Error("不允许向这个地址发送 DeepSeek Key。");
-            // 阶段一：创建可取消且有时间上限的网络请求，避免假“思考”一直转圈。
-            const controller = new AbortController();
-            /**
-             * 输入：无，读取外部取消信号。
-             * 输出：无。
-             * 功能：把用户取消传递给正在等待的网络请求。
-             */
-            const cancel = () => controller.abort(signal?.reason);
-            if (signal?.aborted)
-                controller.abort(signal.reason);
-            signal?.addEventListener("abort", cancel, { once: true });
+            const P = __fluffyModules["ai-policy.js"], ErrorType = P?.AIError || Error;
+            P?.throwIfAborted(signal);
+            if (!this.configured) throw new ErrorType("deepseek-key", "先启用 DeepSeek，再说给小猫听。");
+            if (!Object.values(this.routes).includes(path)) throw new ErrorType("ai-parameter", "不允许向这个地址发送 Key。");
+            // 阶段一：同一个请求代次共享取消、密钥快照和总超时；更换Key使旧结果失效。
+            const version = this.keyVersion, key = this.#key, controller = new AbortController();
             let timedOut = false;
-            const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 35000);
+            /** 输入：无。输出：无。功能：将用户取消传到网络与重试等待。 */
+            const cancel = () => controller.abort();
+            signal?.addEventListener("abort", cancel, { once: true });
+            const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, payload ? this.requestTimeoutMs : 20000);
+            /** 输入：毫秒数。输出：Promise。功能：有上限的退避；取消后不再重试。 */
+            const wait = ms => new Promise((resolve, reject) => {
+                let timer;
+                const aborted = () => { clearTimeout(timer); reject(new DOMException("Canceled", "AbortError")); };
+                if (controller.signal.aborted) { aborted(); return; }
+                controller.signal.addEventListener("abort", aborted, { once: true });
+                timer = setTimeout(() => { controller.signal.removeEventListener("abort", aborted); resolve(); }, ms);
+            });
             try {
-                const response = await this.fetch(path, {
-                    method: payload ? "POST" : "GET", redirect: "error", mode: "cors", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
-                    headers: { Authorization: `Bearer ${this.#key}`, ...(payload ? { "Content-Type": "application/json" } : {}) },
-                    ...(payload ? { body: JSON.stringify(payload) } : {}), signal: controller.signal
-                });
-                // 阶段二：失败信息按状态映射，不把包含敏感信息的上游正文直接展示给用户。
-                if (!response.ok)
-                    throw Error(apiError(response.status));
-                return await response.json();
-            }
-            catch (error) {
-                if (timedOut)
-                    throw Error("整理超时了。请检查网络，或者先自己填写。");
-                if (controller.signal.aborted)
-                    throw new DOMException("已取消", "AbortError");
-                if (error instanceof TypeError)
-                    throw Error("无法连接 DeepSeek，请检查网络后重试。");
+                // 阶段二：仅对明确的限流/临时HTTP故障重试一次；不重复未知状态的网络请求。
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    P?.throwIfAborted(controller.signal);
+                    if (version !== this.keyVersion) throw new DOMException("Canceled", "AbortError");
+                    const response = await this.fetch(path, {
+                        method: payload ? "POST" : "GET", redirect: "error", mode: "cors", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
+                        headers: { Authorization: `Bearer ${key}`, ...(payload ? { "Content-Type": "application/json" } : {}) },
+                        ...(payload ? { body: JSON.stringify(payload) } : {}), signal: controller.signal
+                    });
+                    P?.throwIfAborted(controller.signal);
+                    if (!response.ok) {
+                        const retryAfter = response.headers?.get?.("Retry-After"), number = Number(retryAfter);
+                        const delay = retryAfter ? (Number.isFinite(number) ? number * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now())) : 700;
+                        if (!attempt && [429, 500, 502, 503, 504].includes(response.status) && delay >= 0 && delay <= 2500) {
+                            try { await response.body?.cancel(); } catch { /* 故障正文不需要读取。 */ }
+                            await wait(Math.max(150, delay));
+                            continue;
+                        }
+                        const code = ({400:"ai-parameter",401:"auth-deepseek",402:"ai-balance",403:"ai-permission",404:"ai-model",422:"ai-parameter",429:"ai-busy",500:"ai-busy",502:"ai-busy",503:"ai-busy",504:"ai-timeout"})[response.status] || "ai-network";
+                        throw new ErrorType(code, apiError(response.status), { provider: "deepseek", status: response.status });
+                    }
+                    // 阶段三：读取和形状错误与听写失败分开，不回显服务商正文。
+                    let result;
+                    try { result = await response.json(); }
+                    catch (e) { if (controller.signal.aborted) throw e; throw new ErrorType("ai-format", "DeepSeek 返回格式不正确。"); }
+                    P?.throwIfAborted(controller.signal);
+                    if (version !== this.keyVersion) throw new DOMException("Canceled", "AbortError");
+                    if (!result || typeof result !== "object" || result.error) throw new ErrorType("ai-format", "DeepSeek 返回结构不正确。");
+                    return result;
+                }
+            } catch (error) {
+                if (timedOut) throw new ErrorType("ai-timeout", "整理超时了，你的输入还在。");
+                if (controller.signal.aborted) throw new DOMException("Canceled", "AbortError");
+                if (error instanceof TypeError) throw new ErrorType("ai-network", "无法连接 DeepSeek，请检查网络。");
                 throw error;
-            }
-            finally {
+            } finally {
                 clearTimeout(timeout);
                 signal?.removeEventListener("abort", cancel);
             }

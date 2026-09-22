@@ -7,11 +7,13 @@ __fluffyModules["bailian-settings.js"] = (() => {
          * 输出：下拉控制器。
          * 功能：仅显示Key/启用/清除，状态由真实校验结果驱动。
          */
-        constructor(client, config, { onOpen = () => { }, onClear = () => { } } = {}) {
+        constructor(client, config, { onOpen = () => { }, onClear = () => { }, onError = () => { }, onEnabled = () => { } } = {}) {
             this.client = client;
             this.config = config;
             this.onOpen = onOpen;
             this.onClear = onClear;
+            this.onError = onError;
+            this.onEnabled = onEnabled;
             this.serial = 0;
             this.root = document.getElementById("bailian-popover");
             this.button = document.getElementById("open-bailian");
@@ -77,10 +79,11 @@ __fluffyModules["bailian-settings.js"] = (() => {
                 this.indicator.classList.add("enabled");
                 this.task = null;
                 this.close();
+                this.onEnabled();
             }
             catch (e) {
                 if (serial === this.serial && e.name !== "AbortError")
-                    this.feedback.textContent = e.message;
+                    this.onError(e);
             }
             finally {
                 candidate.clear();

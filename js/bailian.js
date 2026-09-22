@@ -1,4 +1,4 @@
-/* 百炼密钥只存在实例私有内存。不得把 Key、音频或照片写入仓库与本机历史。 */
+/* 百炼密钥只存在实例私有内存。百炼仅用于照片分析；不得把 Key 或照片写入仓库与本机历史。 */
 __fluffyModules["bailian.js"] = (() => {
     "use strict";
     /**
@@ -20,7 +20,7 @@ __fluffyModules["bailian.js"] = (() => {
      * 功能：不回显可能含敏感数据的上游错误正文。
      */
     function errorMessage(status) {
-        return ({ 400: "百炼暂不能处理这份内容，请检查模型配置或缩短输入。", 401: "百炼 Key 无效，或与当前接口地域不匹配。", 402: "百炼余额不足。", 403: "当前百炼 Key 没有该模型的权限。", 404: "当前百炼地域未提供配置的模型或接口。", 413: "音频或照片过大，请缩短录音或换一张照片。", 429: "百炼请求较多或额度已用完，请稍后重试。" })[status] || "百炼服务暂时不可用，请稍后再试。";
+        return ({ 400: "百炼暂不能处理这份内容，请检查模型配置或缩短输入。", 401: "百炼 Key 无效，或与当前接口地域不匹配。", 402: "百炼余额不足。", 403: "当前百炼 Key 没有该模型的权限。", 404: "当前百炼地域未提供配置的模型或接口。", 413: "照片过大，请换一张照片。", 429: "百炼请求较多或额度已用完，请稍后重试。" })[status] || "百炼服务暂时不可用，请稍后再试。";
     }
     /**
      * 输入：ReadableStream、signal。
@@ -108,7 +108,8 @@ __fluffyModules["bailian.js"] = (() => {
             this.base = officialBase(config.bailianBaseURL);
             this.routes = { chat: this.base + "/chat/completions", models: this.base + "/models" };
             this.model = config.bailianVisionModel || "qwen3-vl-plus";
-            this.audioModel = config.bailianAudioModel || "qwen3-omni-flash";
+            this.keyVersion = 0;
+            this.requestTimeoutMs = config.requestTimeoutMs || 65000;
         }
         /**
          * 输入：无。
@@ -122,24 +123,30 @@ __fluffyModules["bailian.js"] = (() => {
          * 功能：仅在内存接收格式合法的 Key。
          */
         setKey(key) { const value = String(key || "").trim(); if (value.length < 12 || value.length > 256 || /\s/.test(value))
-            throw Error("请填写完整的百炼 API Key。"); this.#key = value; }
+            throw Error("请填写完整的百炼 API Key。"); this.#key = value; this.keyVersion++; }
         /**
          * 输入：无。
          * 输出：无。
          * 功能：清除 Key 引用，调用方同时取消该服务的请求。
          */
-        clear() { this.#key = ""; }
+        clear() { this.#key = ""; this.keyVersion++; }
         /**
          * 输入：固定请求地址、payload/null、signal。
          * 输出：解析后的 JSON。
          * 功能：实际调用百炼，统一超时、取消、跨域/网络错误和 SSE；拒绝重定向。
          */
         async request(path, payload, signal) {
+            __fluffyModules["ai-policy.js"]?.throwIfAborted(signal);
+            const P = __fluffyModules["ai-policy.js"];
+            P?.throwIfAborted(signal);
             if (!this.configured)
-                throw Error("先在右上角启用阿里云百炼。");
+                throw P ? new P.AIError("bailian-key", "先在右上角启用阿里云百炼。", { provider: "bailian" }) : Error("先在右上角启用阿里云百炼。");
             if (!Object.values(this.routes).includes(path))
                 throw Error("不允许向这个地址发送百炼 Key。");
-            const controller = new AbortController();
+            // 阶段一：客户端也阻止音频/纯语言任务误投百炼，校验Key的GET不受影响。
+            if (payload && (!payload.messages?.some(m => Array.isArray(m.content) && m.content.some(c => c.type === "image_url")) || payload.messages.some(m => Array.isArray(m.content) && m.content.some(c => c.type === "input_audio"))))
+                throw P ? new P.AIError("ai-parameter", "百炼只接收照片分析任务。", { provider: "bailian" }) : Error("百炼只接收照片分析任务。");
+            const version = this.keyVersion, key = this.#key, controller = new AbortController();
             let timedOut = false;
             /**
              * 输入：无。
@@ -150,26 +157,35 @@ __fluffyModules["bailian.js"] = (() => {
             if (signal?.aborted)
                 cancel();
             signal?.addEventListener("abort", cancel, { once: true });
-            const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, payload ? 65000 : 20000);
+            const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, payload ? this.requestTimeoutMs : 20000);
             try {
                 // 阶段一：只向公开配置中的一个官方端点发送，不自动跨地域探测 Key。
                 const response = await this.fetch(path, { method: payload ? "POST" : "GET", mode: "cors", credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer", signal: controller.signal,
-                    headers: { Authorization: `Bearer ${this.#key}`, ...(payload ? { "Content-Type": "application/json" } : {}) }, ...(payload ? { body: JSON.stringify(payload) } : {}) });
-                if (!response.ok)
-                    throw Error(errorMessage(response.status));
-                // 阶段二：音频模型按官方要求使用流式文本输出；非流式图像调用按 JSON 处理。
-                const result = payload?.stream ? await readSSE(response.body, controller.signal) : await response.json();
-                if (controller.signal.aborted)
-                    throw new DOMException("已取消", "AbortError");
+                    headers: { Authorization: `Bearer ${key}`, ...(payload ? { "Content-Type": "application/json" } : {}) }, ...(payload ? { body: JSON.stringify(payload) } : {}) });
+                if (controller.signal.aborted || version !== this.keyVersion) throw new DOMException("Canceled", "AbortError");
+                if (!response.ok) {
+                    const code = ({400:"ai-parameter",401:"auth-bailian",402:"ai-balance",403:"ai-permission",404:"ai-model",413:"photo-large",429:"ai-busy",500:"ai-busy",502:"ai-busy",503:"ai-busy",504:"ai-timeout"})[response.status] || "ai-network";
+                    throw P ? new P.AIError(code, errorMessage(response.status), {provider:"bailian",status:response.status}) : Error(errorMessage(response.status));
+                }
+                // 阶段二：只解析视觉响应，HTTP成功但坏JSON仍是格式问题，不归咎于麦克风。
+                let result;
+                try { result = payload?.stream ? await readSSE(response.body, controller.signal) : await response.json(); }
+                catch(error) {
+                    if (controller.signal.aborted) throw error;
+                    throw P ? new P.AIError("ai-format", "百炼响应格式不正确。", {provider:"bailian"}) : Error("百炼响应格式不正确。");
+                }
+                if (controller.signal.aborted || version !== this.keyVersion) throw new DOMException("Canceled", "AbortError");
+                if (!result || typeof result !== "object" || result.error)
+                    throw P ? new P.AIError("ai-format", "百炼响应结构不正确。", {provider:"bailian"}) : Error("百炼响应结构不正确。");
                 return result;
             }
             catch (e) {
                 if (timedOut)
-                    throw Error("百炼整理超时了，请稍后重试。");
+                    throw P ? new P.AIError("ai-timeout", "百炼整理超时了，请稍后重试。", {provider:"bailian"}) : Error("百炼整理超时了，请稍后重试。");
                 if (controller.signal.aborted)
                     throw new DOMException("已取消", "AbortError");
                 if (e instanceof TypeError)
-                    throw Error("无法连接百炼，请检查网络或接口跨域配置。");
+                    throw P ? new P.AIError("ai-network", "无法连接百炼，请检查网络或接口跨域配置。", {provider:"bailian"}) : Error("无法连接百炼，请检查网络或接口跨域配置。");
                 throw e;
             }
             finally {

@@ -1,7 +1,7 @@
 /* 只读数据回顾与陪伴对话。可交互UI、音频生命周期、图表动画和猫咪连续状态均在本模块隔离。 */
 __fluffyModules["review.js"] = (() => {
     "use strict";
-    const Layout = __fluffyModules["review-layout.js"];
+    const Layout = __fluffyModules["review-layout.js"], Feedback = __fluffyModules["cat-feedback.js"], Policy = __fluffyModules["ai-policy.js"];
     const Data = __fluffyModules["review-data.js"], Talk = __fluffyModules["review-conversation.js"], Store = __fluffyModules["journal-store.js"];
     const { HoldGesture } = __fluffyModules["gesture.js"], { AudioSession } = __fluffyModules["audio-session.js"], { SpeechSession } = __fluffyModules["speech.js"];
     /**
@@ -48,6 +48,9 @@ __fluffyModules["review.js"] = (() => {
             this.controller = null;
             this.lang = Store.read("fluffy-review-language-v1", "zh") === "en" ? "en" : "zh";
             this.sessions = new Map();
+            this.textDrafts = new Map();
+            this.pendingMessage = null;
+            this.retryPending = false;
             this.openings = new Set();
             this.queue = [];
             this.wave = Array(72).fill(0);
@@ -70,7 +73,7 @@ __fluffyModules["review.js"] = (() => {
             <button class="primary review-chat" id="review-chat" type="button" aria-label="长按和小猫聊两句；空格键长按录音，Escape取消">${icon("mic")}<span id="review-chat-label"></span><canvas class="review-chat-wave" id="review-chat-wave" width="694" height="128" hidden aria-hidden="true"></canvas></button>`;
             $("screen").append(this.root);
             const callbacks = { onLevel: (level, history) => { this.level = level; this.wave = history.slice(); }, onStarted: () => this.started(), onText: text => { this.liveText = text; }, onError: message => this.fail(message), onLimit: () => { this.hold.disarm(); this.release(); } };
-            this.raw = new AudioSession(callbacks);
+            this.raw = { cancel() {} }; // 不再使用百炼原始音频；回顾也走浏览器听写。
             this.speech = new SpeechSession(callbacks);
             this.hold = new HoldGesture($("review-chat"), { short: () => this.short(), long: () => this.begin(), release: () => this.release(), cancel: () => {
                     if (["requesting", "listening"].includes(this.phase))
@@ -80,6 +83,12 @@ __fluffyModules["review.js"] = (() => {
             $("review-more").onclick = () => this.toggleMenu();
             $("review-pet").onclick = () => { this.h.animation.petAt = this.h.animation.idle; };
             $("review-bubble").onclick = () => {
+                if (this.retryPending && this.pendingMessage && this.pendingMessage.key === this.sessionKey && !["thinking", "listening", "requesting", "authorizing"].includes(this.phase)) {
+                    const pending = this.pendingMessage;
+                    this.retryPending = false;
+                    this.send(pending.text);
+                    return;
+                }
                 if (this.queue.length) {
                     this.paused = !this.paused;
                     $("review-bubble").dataset.paused = String(this.paused);
@@ -113,6 +122,8 @@ __fluffyModules["review.js"] = (() => {
             this.active = true;
             this.status("");
             this.pendingIntent = null;
+            this.pendingMessage = null;
+            this.retryPending = false;
             this.renderIntentButton();
             this.root.hidden = false;
             const id = typeof record === "string" ? record : record.category;
@@ -130,7 +141,7 @@ __fluffyModules["review.js"] = (() => {
             this.setPhase("idle");
             this.enqueue([{ text: Talk.greeting(this.view, this.lang), gesture: "soft" }]);
             const opening = `${this.sessionKey}:${this.lang}:${this.view.records.map(r => r.id + JSON.stringify(r.data)).join("|")}`;
-            if ((this.h.api.configured || this.h.bailian.configured) && !this.openings.has(opening)) {
+            if (this.h.api.configured && !this.openings.has(opening)) {
                 this.openings.add(opening);
                 if (this.openings.size > 36)
                     this.openings.delete(this.openings.values().next().value);
@@ -182,7 +193,22 @@ __fluffyModules["review.js"] = (() => {
          * 输出：无。
          * 功能：短暂操作提示不占常驻布局。
          */
-        status(text) { clearTimeout(this.statusTimer); $("review-status").textContent = text; $("review-status").classList.toggle("visible", Boolean(text)); this.statusTimer = setTimeout(() => $("review-status").classList.remove("visible"), 3800); }
+        status(text) {
+            clearTimeout(this.statusTimer);
+            $("review-status").textContent = "";
+            $("review-status").classList.remove("visible");
+            if (text && this.active) this.notify(text);
+        }
+        /**
+         * 输入：错误或受控提示码。
+         * 输出：无。
+         * 功能：回顾数据保持原位，错误也由原小猫气泡逐句讲，不显示底部状态条。
+         */
+        notify(message) {
+            if (!this.active) return;
+            this.enqueue([{ text: Feedback.say(message, { language: this.lang }), gesture: "soft" }]);
+            $("review-bubble").dataset.feedback = "help";
+        }
         /**
          * 输入：announce。
          * 输出：无。
@@ -226,17 +252,19 @@ __fluffyModules["review.js"] = (() => {
             this.paused = false;
             if (!pressed)
                 return;
-            if (!this.h.api.configured && !this.h.bailian.configured) {
+            if (!this.h.api.configured) {
                 this.hold.disarm();
-                this.status(this.t("先启用右上角的 AI", "Enable an AI key at the top right"));
+                this.notify("deepseek-key");
                 this.h.openSettings();
                 return;
             }
-            this.input = this.h.bailian.configured ? this.raw : this.speech;
+            this.input = this.speech;
+            this.pendingMessage = null;
+            this.retryPending = false;
             if (!this.input.supported()) {
                 this.hold.disarm();
                 this.setPhase("idle");
-                this.status(this.t("可在菜单选择文字聊聊", "Use Text chat from the menu"));
+                this.notify("speech-unsupported");
                 return;
             }
             const serial = this.serial;
@@ -254,7 +282,7 @@ __fluffyModules["review.js"] = (() => {
                     if (serial !== this.serial || !this.active)
                         return;
                     this.setPhase("idle");
-                    this.status(this.t("准备好了，再次按住说话", "Ready. Hold again to speak"));
+                    this.notify("permission-ready");
                     return;
                 }
                 if (!this.hold.pressed) {
@@ -268,7 +296,7 @@ __fluffyModules["review.js"] = (() => {
             }
             catch (e) {
                 if (serial === this.serial && e.name !== "AbortError")
-                    this.fail(e.name === "NotAllowedError" ? "麦克风没有被允许。" : e.message);
+                    this.fail(e.name === "NotAllowedError" ? "speech-permission" : e);
             }
         }
         /**
@@ -305,13 +333,12 @@ __fluffyModules["review.js"] = (() => {
                 this.level = 0;
                 if (serial !== this.serial || !this.active || result.canceled)
                     return;
-                if (!result.text && !result.audio)
-                    throw Error("这次没有听清，再说一次吧。");
-                await this.send(result.text || "", result.audio || null, false);
+                if (!result.text?.trim()) throw new Policy.AIError("speech-empty", "没有收到听写原文。");
+                await this.send(result.text, null, false);
             }
             catch (e) {
                 if (serial === this.serial && e.name !== "AbortError")
-                    this.fail(e.message);
+                    this.fail(e);
             }
             finally {
                 if (result)
@@ -324,7 +351,13 @@ __fluffyModules["review.js"] = (() => {
          * 功能：以回顾快照和本轮上下文请求真实回复，成功才加入会话。
          */
         async send(text, audio = null, opening = false) {
+            if (!opening && this.phase === "thinking" && this.controller) return;
             const serial = ++this.serial, key = this.sessionKey, controller = new AbortController();
+            if (!opening) {
+                this.pendingMessage = { text: String(text || ""), key };
+                this.retryPending = false;
+                this.textDrafts.set(key, String(text || ""));
+            }
             this.controller?.abort();
             this.controller = controller;
             if (!opening) {
@@ -336,6 +369,8 @@ __fluffyModules["review.js"] = (() => {
                 const answer = await Talk.request({ api: this.h.api, bailian: this.h.bailian, view: this.view, history: this.history(), text, audio, lang: this.lang, opening, signal: controller.signal });
                 if (serial !== this.serial || key !== this.sessionKey || !this.active || controller.signal.aborted)
                     return;
+                this.retryPending = false;
+                if (!opening) { this.pendingMessage = null; this.textDrafts.delete(key); }
                 const history = this.history();
                 if (!opening)
                     history.push({ role: "user", content: audio ? answer.transcript : text });
@@ -344,13 +379,12 @@ __fluffyModules["review.js"] = (() => {
                 this.enqueue(answer.replies);
                 if (!opening) {
                     const words = audio ? answer.transcript : text, Intent = __fluffyModules["record-intent.js"];
-                    const proposal = await Intent.infer(words, { category: this.view.id, date: this.view.date }, this.h.api.configured ? this.h.api : this.h.bailian, controller.signal);
+                    const proposal = await Intent.infer(words, { category: this.view.id, date: this.view.date }, this.h.api, controller.signal);
                     if (serial !== this.serial || !this.active || key !== this.sessionKey)
                         return;
                     this.pendingIntent = proposal.operation !== "none" ? { words, proposal } : null;
                     this.buildMenu();
-                    if (this.pendingIntent)
-                        this.status(this.t("要记下来？点气泡旁的记事按钮", "Want to save this? Tap the note button."));
+                    // 记事按钮表示可确认的操作，不打断小猫已经开始的对话。
                     this.renderIntentButton();
                 }
             }
@@ -359,9 +393,11 @@ __fluffyModules["review.js"] = (() => {
                     return;
                 this.controller = null;
                 if (opening)
-                    this.status(this.t("AI 暂未接通，仍可查看数据", "AI unavailable. Your review is still here."));
-                else
-                    this.fail(e.message);
+                    this.notify(e);
+                else {
+                    this.retryPending = true;
+                    this.fail(e);
+                }
             }
             finally {
                 if (this.controller === controller)
@@ -430,8 +466,10 @@ __fluffyModules["review.js"] = (() => {
             this.cancel(false);
             if (!this.active)
                 return;
-            this.h.toast(message);
-            this.showLines([this.t("这次没接上呢", "That didn't connect."), this.t("我们再试一次吧", "Let's try again.")]);
+            const replies = [{ text: Feedback.say(message, { language: this.lang }), gesture: "soft" }];
+            if (this.retryPending && this.pendingMessage?.key === this.sessionKey) replies.push({ text: Feedback.say("retry", { language: this.lang }), gesture: "nod" });
+            this.enqueue(replies);
+            $("review-bubble").dataset.feedback = "help";
         }
         /**
          * 输入：replies。
@@ -846,6 +884,7 @@ __fluffyModules["review.js"] = (() => {
                 input.name = "message";
                 input.maxLength = 800;
                 input.rows = 4;
+                input.value = this.textDrafts.get(this.sessionKey) || "";
                 input.setAttribute("aria-label", this.t("想和小猫说什么", "What would you like to say?"));
                 label.htmlFor = input.id;
                 label.append(node("span", "", this.t("想和小猫说什么", "What would you like to say?")), input);
@@ -872,7 +911,11 @@ __fluffyModules["review.js"] = (() => {
                     this.h.closeSheet();
                     this.send(text);
                 });
-                input.addEventListener("input", () => input.removeAttribute("aria-invalid"));
+                input.addEventListener("input", () => {
+                    input.removeAttribute("aria-invalid");
+                    this.textDrafts.set(this.sessionKey, input.value);
+                    while (this.textDrafts.size > 18) this.textDrafts.delete(this.textDrafts.keys().next().value);
+                });
                 input.addEventListener("keydown", event => {
                     if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.isComposing && event.keyCode !== 229) {
                         event.preventDefault();

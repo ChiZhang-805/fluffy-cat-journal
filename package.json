@@ -1,17 +1,19 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "11.0.0",
+  "version": "13.0.0",
   "private": true,
-  "description": "Cohesive icons, explicit new/edit journal flows and app-wide English",
+  "description": "Automatic meal photo analysis, flat nutrition inputs and safe editable drafts",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:browser": "python tests/v11-browser.py",
+    "test:browser": "python tests/v13-browser.py",
     "evaluate:emotion": "node tools/evaluate-emotion.cjs",
-    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v11.html",
+    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v13.html",
     "test:recap": "node --test tests/review.test.cjs",
     "test:v9": "node --test tests/entry-action.test.cjs && python tests/interaction_v9_browser_test.py",
     "test:v10": "node --test tests/entry-action.test.cjs tests/review-layout.test.cjs && python tests/refinement_v10_browser_test.py",
-    "test:v11": "node --test tests/v11-core.test.cjs && python tests/v11-browser.py"
+    "test:v11": "node --test tests/v11-core.test.cjs && python tests/v11-browser.py",
+    "test:v12": "node --test tests/v12-ai.test.cjs && python tests/v12-browser.py",
+    "test:v13": "node --test tests/photo-v13.test.cjs && python tests/v13-browser.py"
   },
   "engines": {
     "node": ">=20"
