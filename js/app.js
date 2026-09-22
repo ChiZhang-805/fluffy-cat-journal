@@ -3,6 +3,10 @@ __fluffyModules["app.js"] = (() => {
     "use strict";
     const { CompanionAnimation } = __fluffyModules["animation.js"];
     const { DeepSeekClient } = __fluffyModules["deepseek.js"];
+    const { BailianClient } = __fluffyModules["bailian.js"];
+    const { BailianSettings } = __fluffyModules["bailian-settings.js"];
+    const { AudioSession } = __fluffyModules["audio-session.js"];
+    const Sleep = __fluffyModules["sleep-time.js"];
     const { SpeechSession } = __fluffyModules["speech.js"];
     const { MicrophonePermission } = __fluffyModules["microphone-permission.js"];
     const { HoldGesture } = __fluffyModules["gesture.js"];
@@ -38,7 +42,9 @@ __fluffyModules["app.js"] = (() => {
         node.innerHTML = icon(name);
     }
     const api = new DeepSeekClient({ config: CONFIG, model: CONFIG.model });
+    const bailian = new BailianClient({ config: CONFIG });
     const state = {
+        recordDate: Sleep.dateKey(), sleepDates: {}, emotionDraft: null, voiceBackend: "text",
         category: "sport", phase: "idle", serial: 0, task: null, record: null, source: "manual", estimated: false, versions: {}, drafts: {}, keySerial: 0, keyTask: null, filter: "all", sheetClose: null, focusRecord: null, timerNotified: false, taskId: null
     };
     const animation = new CompanionAnimation({ onReady, onRender: renderExtras, synchronize: synchronizeUI });
@@ -46,6 +52,8 @@ __fluffyModules["app.js"] = (() => {
     const speech = new SpeechSession({
         onLevel: audioLevel, onText: receivedSpeech, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech
     });
+    const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
+    let activeSpeech = speech, bailianSettings;
     let gesture, board, toastTimer, homeBubbleTimer, cameraVideo = null, sheetReturn = null, wave = Array(72).fill(0), lastTimerText = "", lastUI = "", lastFocusSave = 0;
     /**
      * 输入：文字、error。
@@ -165,7 +173,8 @@ __fluffyModules["app.js"] = (() => {
         board?.cancel();
         closeSheet(false);
         closeSettings(false);
-        photo.stopCamera();
+        bailianSettings?.close(false);
+        photo.clear();
         animation.actor && (animation.actor.companionPet = 0);
         animation.setScene(scene, options.time || 0, true);
         $("screen").classList.remove("route-changing");
@@ -198,10 +207,16 @@ __fluffyModules["app.js"] = (() => {
         photo.clear();
         state.category = id;
         state.record = record;
+        state.recordDate = record?.data?.recordDate || record?.data?.wakeDate || (record ? Sleep.dateKey(new Date(record.createdAt)) : Sleep.dateKey());
+        state.sleepDates = id === "sleep" && record ? { bedDate: record.data.bedDate || Sleep.validDate(String(record.data.bedtime).split("T")[0]), wakeDate: record.data.wakeDate || Sleep.validDate(String(record.data.wakeTime).split("T")[0]) } : {};
+        state.emotionDraft = null;
         state.taskId = null;
         state.estimated = Boolean(record?.estimated);
         state.source = "manual";
-        renderForm(values || state.drafts[id] || {});
+        const initial = values || state.drafts[id] || {};
+        if (id === "sleep" && !record)
+            state.sleepDates = { bedDate: initial.bedDate || "", wakeDate: initial.wakeDate || "" };
+        renderForm(initial);
         navigate("entry");
         bubble(Catalog.category(id).greeting);
     }
@@ -211,7 +226,8 @@ __fluffyModules["app.js"] = (() => {
      * 功能：只读取当前类别已有的输入控件。
      */
     function rawForm() {
-        return Object.fromEntries(Catalog.category(state.category).fields.map(f => [f.key, $(`field-${f.key}`)?.value ?? ""]));
+        const fields = Object.fromEntries(Catalog.category(state.category).fields.map(f => [f.key, $(`field-${f.key}`)?.value ?? ""]));
+        return state.category === "sleep" ? { ...fields, ...state.sleepDates } : fields;
     }
     /**
      * 输入：无。
@@ -237,7 +253,7 @@ __fluffyModules["app.js"] = (() => {
                 protectedCount++;
                 continue;
             }
-            input.value = String(fields[f.key]);
+            input.value = f.type === "time" ? Sleep.clock(fields[f.key]) : String(fields[f.key]);
             updateFieldDisplay(f, input);
             input.setAttribute("aria-invalid", "false");
         }
@@ -247,7 +263,7 @@ __fluffyModules["app.js"] = (() => {
     /**
      * 输入：field、input。
      * 输出：无。
-     * 功能：选择芯片/滑块读数跟随真实表单值。
+     * 功能：餐次选择状态跟随真实表单值；情绪和睡眠感受不再使用选项。
      */
     function updateFieldDisplay(field, input) {
         if (field.type === "choice")
@@ -255,8 +271,6 @@ __fluffyModules["app.js"] = (() => {
                 b.classList.toggle("selected", b.dataset.value === input.value);
                 b.setAttribute("aria-pressed", String(b.dataset.value === input.value));
             });
-        if (field.type === "range")
-            input.parentElement.querySelector("output").textContent = `${input.value} / ${field.max}`;
     }
     /**
      * 输入：field、value。
@@ -267,11 +281,15 @@ __fluffyModules["app.js"] = (() => {
         const label = el("label", "field"), head = el("span", "field-header"), name = el("span", "", field.label);
         head.append(name);
         label.append(head);
-        const input = el("input");
+        const input = el(field.type === "textarea" ? "textarea" : "input");
+        if (field.type === "textarea") {
+            label.classList.add("field-long");
+            input.rows = 3;
+        }
         input.id = `field-${field.key}`;
         input.name = field.key;
         input.autocomplete = "off";
-        input.value = value ?? field.initial ?? "";
+        input.value = field.type === "time" && value ? Sleep.clock(value) : value ?? field.initial ?? "";
         input.setAttribute("aria-label", field.label);
         if (field.max)
             input.maxLength = field.max;
@@ -296,16 +314,13 @@ __fluffyModules["app.js"] = (() => {
             });
             label.append(choices);
         }
-        else if (field.type === "range") {
-            input.type = "range";
-            input.min = field.min;
-            input.max = field.max;
-            input.step = 1;
-            head.append(el("output", "", `${input.value} / ${field.max}`));
-            label.append(input);
-        }
         else {
-            input.type = field.type === "datetime-local" ? field.type : "text";
+            if (field.type !== "textarea")
+                input.type = field.type === "time" ? "time" : "text";
+            if (field.type === "time") {
+                input.step = "60";
+                input.setAttribute("aria-description", "24小时制，只需要时和分");
+            }
             if (field.type === "decimal") {
                 input.inputMode = "decimal";
                 input.maxLength = 16;
@@ -327,6 +342,9 @@ __fluffyModules["app.js"] = (() => {
         input.addEventListener("input", () => {
             state.versions[field.key] = (state.versions[field.key] || 0) + 1;
             input.setAttribute("aria-invalid", "false");
+            // 手动修改任一睡眠时刻后重新推导跨天，不能沿用AI曾猜的另一天。
+            if (state.category === "sleep" && ["bedtime", "wakeTime"].includes(field.key))
+                state.sleepDates = {};
             updateFieldDisplay(field, input);
             preserveDraft();
         });
@@ -348,6 +366,10 @@ __fluffyModules["app.js"] = (() => {
         $("entry-heading").querySelector("h1").textContent = def.title;
         // 阶段二：照片相关入口仅给饮食/面部；点击分析前不联网。
         if (def.photo) {
+            const preview = el("div", "photo-preview");
+            preview.id = "photo-preview";
+            preview.setAttribute("aria-label", "照片预览框");
+            form.append(preview);
             const tools = el("div", "photo-tools");
             for (const [title, name, action] of [["拍照", "camera", openCamera], ["选择照片", "photo", () => $("photo-library").click()]]) {
                 const b = el("button", "photo-tool");
@@ -358,10 +380,6 @@ __fluffyModules["app.js"] = (() => {
                 tools.append(b);
             }
             form.append(tools);
-            const preview = el("div", "photo-preview");
-            preview.id = "photo-preview";
-            preview.hidden = true;
-            form.append(preview);
             const analyze = el("button", "analyze-photo");
             analyze.type = "button";
             analyze.id = "analyze-photo";
@@ -370,14 +388,14 @@ __fluffyModules["app.js"] = (() => {
             analyze.append(el("span", "", "让小猫看看"));
             analyze.onclick = analyzePhoto;
             form.append(analyze);
-            form.append(el("p", "photo-note", state.category === "face" ? "仅观察外观；疲惫以自我感受为准，不作诊断。" : "营养为估算，份量和做法可以补充、修改。"));
+            showPhoto(null);
         }
         // 阶段三：主字段与可折叠营养字段使用同一校验定义。
         const note = el("div", "ai-draft-note");
         note.id = "draft-note";
         note.hidden = true;
         form.append(note);
-        const mainFields = def.fields.filter(f => !f.group);
+        const mainFields = def.fields.filter(f => !f.group && !(def.photo && f.key === "notes"));
         mainFields.forEach(f => {
             state.versions[f.key] = 0;
             form.append(makeField(f, values[f.key]));
@@ -385,11 +403,19 @@ __fluffyModules["app.js"] = (() => {
         if (def.fields.some(f => f.group)) {
             const details = el("details", "nutrition-details"), summary = el("summary", "", "营养信息 · 估算"), grid = el("div", "nutrition-fields");
             details.append(summary, grid);
+            details.open = true;
             def.fields.filter(f => f.group).forEach(f => {
                 state.versions[f.key] = 0;
                 grid.append(makeField(f, values[f.key]));
             });
             form.append(details);
+        }
+        if (def.photo) {
+            const last = def.fields.find(f => f.key === "notes");
+            if (last) {
+                state.versions[last.key] = 0;
+                form.append(makeField(last, values[last.key]));
+            }
         }
         if (state.category === "focus") {
             const b = el("button", "form-secondary", "放入待办，稍后开始");
@@ -414,7 +440,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：确认前检查必需项；焦点定位错误而不显示一屏说明。
      */
     function checkedForm() {
-        const checked = Catalog.validate(state.category, rawForm());
+        const checked = Catalog.validate(state.category, rawForm(), true, { recordDate: state.recordDate });
         showErrors(checked.errors);
         if (!checked.ok) {
             const key = Object.keys(checked.errors)[0];
@@ -444,6 +470,11 @@ __fluffyModules["app.js"] = (() => {
      * 功能：普通记录先书写后庆祝，专注先真实倒计时，不颠倒流程。
      */
     function confirmManual() {
+        // 整理期间表单仍可编辑；短按同一按钮可取消，不丢失用户填写。
+        if (state.phase === "thinking") {
+            cancelWork(true);
+            return;
+        }
         if (state.phase !== "idle" || animation.scene !== "entry" || !animation.ready)
             return;
         const data = checkedForm();
@@ -519,6 +550,7 @@ __fluffyModules["app.js"] = (() => {
         state.task?.abort();
         state.task = null;
         speech.cancel();
+        rawAudio.cancel();
         animation.level = 0;
         wave = Array(72).fill(0);
         state.phase = "idle";
@@ -537,13 +569,21 @@ __fluffyModules["app.js"] = (() => {
     async function beginSpeech() {
         if (animation.scene !== "entry" || state.phase !== "idle")
             return;
-        if (!api.configured) {
-            bubble("先在右上角启用 DeepSeek。", true);
+        const useAudio = bailian.configured;
+        if (state.category === "mood" && !useAudio) {
+            bubble("先启用百炼，让我听懂话里的语气。", true);
+            bailianSettings.open();
+            return;
+        }
+        if (!useAudio && !api.configured) {
+            bubble("先在右上角启用一个 AI 服务。", true);
             openSettings();
             return;
         }
-        if (!speech.supported()) {
-            bubble("这个浏览器暂不支持语音转写，可以直接填写。", true);
+        activeSpeech = useAudio ? rawAudio : speech;
+        state.voiceBackend = useAudio ? "audio" : "text";
+        if (!activeSpeech.supported()) {
+            bubble(useAudio ? "浏览器暂不能录音，可以直接填写。" : "语音转写不可用，可启用百炼直接听录音。", true);
             return;
         }
         cancelWork(false);
@@ -573,7 +613,7 @@ __fluffyModules["app.js"] = (() => {
             state.voiceVersions = { ...state.versions };
             wave = Array(72).fill(0);
             $("speech-transcript").textContent = `说说今天的${Catalog.category(state.category).name}吧。`;
-            await speech.start({ language: CONFIG.speechLanguage, maximumSeconds: CONFIG.maximumSpeechSeconds });
+            await activeSpeech.start({ language: CONFIG.speechLanguage, maximumSeconds: CONFIG.maximumSpeechSeconds });
         }
         catch (error) {
             if (serial === state.serial)
@@ -631,23 +671,31 @@ __fluffyModules["app.js"] = (() => {
         }
         if (state.phase !== "listening")
             return;
-        const serial = state.serial, version = { ...state.voiceVersions }, id = state.category;
+        const serial = state.serial, version = { ...state.voiceVersions }, id = state.category, recordDate = state.recordDate, session = activeSpeech;
         setPhase("thinking");
         bubble("听到了，我整理一下。");
         try {
-            const result = await speech.stop();
+            const result = await session.stop();
             animation.level = 0;
             if (serial !== state.serial || result.canceled)
                 return;
-            if (!result.text)
+            if (!result.text && !result.audio)
                 throw Error("没有听清，长按再说一次吧。");
-            const controller = state.task = new AbortController(), draft = await AI.extract(api, id, result.text, null, controller.signal);
+            const controller = state.task = new AbortController();
+            const draft = result.audio ? await AI.extractAudio(bailian, id, result.audio, JSON.stringify(rawForm()), controller.signal, { recordDate }) : await AI.extract(api, id, result.text, null, controller.signal, { recordDate });
+            // 接口完成即释放本次原始音频引用，历史记录只存用户确认的字段。
+            result.audio = null;
             if (serial !== state.serial || id !== state.category)
                 return;
             state.task = null;
             state.source = "voice";
             state.estimated = draft.estimated;
-            fillForm(draft.fields, version);
+            const protectedCount = fillForm(draft.fields, version);
+            if (id === "sleep" && version.bedtime === state.versions.bedtime && version.wakeTime === state.versions.wakeTime)
+                state.sleepDates = draft.sleepDates || {};
+            state.emotionDraft = draft.emotion || null;
+            if (protectedCount)
+                draft.warnings.push("已保留你刚才手动修改的内容。");
             setPhase("idle");
             showDraft(draft.warnings);
             bubble("写在框里了，确认后交给我记录。");
@@ -666,7 +714,7 @@ __fluffyModules["app.js"] = (() => {
         const note = $("draft-note");
         if (note) {
             note.hidden = false;
-            note.textContent = warnings.length ? warnings.join(" ") : "小猫已整理为草稿，你可以修改。";
+            note.textContent = warnings.length ? warnings.join(" ") : "整理好了，请核对。";
             $("entry-panel").scrollTop = 0;
         }
     }
@@ -716,21 +764,36 @@ __fluffyModules["app.js"] = (() => {
         if (!preview)
             return;
         preview.replaceChildren();
-        preview.hidden = !image;
+        preview.hidden = false;
+        preview.classList.toggle("has-image", Boolean(image));
         $("analyze-photo").hidden = !image;
-        if (!image)
+        if (!image) {
+            preview.style.height = "148px";
+            const placeholder = el("span", "photo-empty");
+            placeholder.innerHTML = icon("photo");
+            placeholder.append(el("span", "", "等待照片"));
+            preview.append(placeholder);
             return;
+        }
         const img = el("img");
+        img.alt = state.category === "face" ? "本次面部照片" : "本次食物照片";
+        /**
+         * 输入：无。
+         * 输出：无。
+         * 功能：按容器可用宽度等比展示整张照片，竖图不裁切或拉伸。
+         */
+        function fitPhoto() {
+            if (img.isConnected && img.naturalWidth)
+                preview.style.height = `${preview.clientWidth * img.naturalHeight / img.naturalWidth}px`;
+        }
+        img.onload = fitPhoto;
         img.src = image;
-        img.alt = state.category === "face" ? "待分析的面部照片" : "待分析的食物照片";
-        const text = el("span", "", "照片已准备好\n点击分析后发送给 DeepSeek");
-        const clear = el("button", "", "移除");
+        const clear = el("button", "photo-remove", "移除");
         clear.type = "button";
-        clear.onclick = () => {
-            photo.clear();
-            showPhoto(null);
-        };
-        preview.append(img, text, clear);
+        clear.setAttribute("aria-label", "移除照片");
+        clear.onclick = () => { cancelWork(false); photo.clear(); showPhoto(null); };
+        preview.append(img, clear);
+        requestAnimationFrame(fitPhoto);
     }
     /**
      * 输入：无。
@@ -785,8 +848,8 @@ __fluffyModules["app.js"] = (() => {
     async function analyzePhoto() {
         if (!photo.image || state.phase !== "idle")
             return;
-        if (!api.configured) {
-            openSettings();
+        if (!bailian.configured) {
+            bailianSettings.open();
             return;
         }
         const image = photo.image, id = state.category, version = { ...state.versions }, text = JSON.stringify(rawForm()), serial = ++state.serial, controller = state.task = new AbortController();
@@ -794,8 +857,8 @@ __fluffyModules["app.js"] = (() => {
         $("speech-transcript").textContent = "我正在看照片，也会参考你填写的内容。";
         bubble("我看看，再一起核对。");
         try {
-            const draft = await AI.extract(api, id, text, image, controller.signal);
-            if (serial !== state.serial || id !== state.category)
+            const draft = await AI.extract(bailian, id, text, image, controller.signal, { recordDate: state.recordDate });
+            if (serial !== state.serial || id !== state.category || photo.image !== image)
                 return;
             fillForm(draft.fields, version);
             state.source = "photo";
@@ -946,33 +1009,6 @@ __fluffyModules["app.js"] = (() => {
         $("today-count").textContent = `${stats.today} / 6`;
         $("days-count").textContent = stats.days;
         $("home-date").textContent = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
-    }
-    /**
-     * 输入：id。
-     * 输出：无。
-     * 功能：长按卡片后给出进入、语音与无障碍排序选项。
-     */
-    function widgetMenu(id) {
-        const c = Catalog.category(id);
-        showSheet(c.name, b => {
-            sheetAction(b, "记录这一刻", c.icon, () => {
-                closeSheet(false);
-                openEntry(id);
-            });
-            sheetAction(b, "说给小猫听", "mic", () => {
-                closeSheet(false);
-                openEntry(id);
-                bubble("长按底部按钮，说给我听。");
-            });
-            sheetAction(b, "往前放一格", "back", () => {
-                board.reorder(id, -1);
-                closeSheet();
-            });
-            sheetAction(b, "往后放一格", "arrow", () => {
-                board.reorder(id, 1);
-                closeSheet();
-            });
-        });
     }
     /**
      * 输入：无。
@@ -1230,7 +1266,7 @@ __fluffyModules["app.js"] = (() => {
                     input.focus();
                     return;
                 }
-                if (!api.configured) {
+                if (!api.configured && !bailian.configured) {
                     openSettings();
                     return;
                 }
@@ -1240,10 +1276,13 @@ __fluffyModules["app.js"] = (() => {
                 setPhase("thinking");
                 $("speech-transcript").textContent = text;
                 try {
-                    const draft = await AI.extract(api, selected, text, null, controller.signal);
+                    const draft = await AI.extract(api.configured ? api : bailian, selected, text, null, controller.signal, { recordDate: state.recordDate });
                     if (serial !== state.serial)
                         return;
                     fillForm(draft.fields);
+                    if (selected === "sleep")
+                        state.sleepDates = draft.sleepDates || {};
+                    state.emotionDraft = draft.emotion || null;
                     state.source = "text-ai";
                     state.estimated = draft.estimated;
                     setPhase("idle");
@@ -1270,6 +1309,7 @@ __fluffyModules["app.js"] = (() => {
             return;
         }
         cancelWork(false);
+        bailianSettings?.close(false);
         gesture?.disarm();
         $("api-key").value = "";
         $("api-feedback").textContent = "";
@@ -1361,7 +1401,7 @@ __fluffyModules["app.js"] = (() => {
         $("bottom-nav").hidden = !(home || inside);
         $("inner-page").hidden = !inside;
         $("focus-page").hidden = !focus;
-        const quiet = ["idle", "authorizing"].includes(state.phase);
+        const quiet = ["idle", "authorizing", "thinking"].includes(state.phase);
         $("entry-panel").hidden = !entry || !quiet;
         $("voice-panel").hidden = !entry || quiet;
         $("entry-heading").hidden = !entry && !(record && a.bridge && bridge < .8);
@@ -1388,9 +1428,9 @@ __fluffyModules["app.js"] = (() => {
         $("primary").classList.toggle("white", hero);
         $("primary").disabled = !a.ready || (hero ? a.time < 4.93 : record ? a.time < a.writeEnd + 3.5 : false);
         $("primary-label").textContent = hero ? "回到首页" : "继续";
-        $("confirm-entry").disabled = !a.ready || ["thinking", "authorizing"].includes(state.phase);
+        $("confirm-entry").disabled = !a.ready || ["authorizing"].includes(state.phase);
         $("confirm-label").textContent = ({
-            idle: state.category === "focus" ? "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "正在整理…"
+            idle: state.category === "focus" ? "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "停止整理"
         })[state.phase];
         $("hero-quote").style.opacity = M.range(a.time, 1.5, 2.5);
         $("hero-subtitle").style.opacity = M.range(a.time, .8, 1.5);
@@ -1526,8 +1566,11 @@ __fluffyModules["app.js"] = (() => {
     function bind() {
         // 阶段一：首页、短按和长按各自绑定，避免一手势触发两条流程。
         document.querySelectorAll("[data-icon]").forEach(n => setIcon(n, n.dataset.icon));
+        bailianSettings = new BailianSettings(bailian, CONFIG, {
+            onOpen: () => { cancelWork(false); gesture?.disarm(); closeSettings(false); }, onClear: () => cancelWork(false)
+        });
         board = new HomeBoard($("home-board"), {
-            open: openEntry, menu: widgetMenu, attend: id => {
+            open: openEntry, warn: toast, attend: id => {
                 animation.homeLookTarget = board.order.indexOf(id) < 3 ? -.2 : .2;
             }, release: () => {
                 animation.homeLookTarget = 0;
@@ -1623,6 +1666,8 @@ __fluffyModules["app.js"] = (() => {
         $("photo-library").onchange = async (e) => {
             const id = state.category;
             try {
+                if (e.target.files?.[0])
+                    cancelWork(false);
                 const image = await photo.readFile(e.target.files?.[0]);
                 if (image && id === state.category && animation.scene === "entry")
                     showPhoto(image);
@@ -1662,6 +1707,9 @@ __fluffyModules["app.js"] = (() => {
             persistFocus();
             closeSettings(false);
             api.clear();
+            $("key-indicator").classList.remove("enabled");
+            bailianSettings.close(false);
+            bailianSettings.clear();
         });
         document.addEventListener("visibilitychange", () => {
             if (document.hidden) {
@@ -1687,7 +1735,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, board, timer, photo, speech, microphone, gesture, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined
+            animation, state, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};

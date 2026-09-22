@@ -1,10 +1,12 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "private": true,
-  "description": "Six-category companion homepage with animated cat, editable journals, vision drafts and focus timer",
+  "description": "Nine-slot companion homepage, single-column photo journals, local sleep times and editable Bailian audio understanding",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs"
+    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs",
+    "test:browser": "python tests/journal_v5_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
+    "evaluate:emotion": "node tools/evaluate-emotion.cjs"
   },
   "engines": {
     "node": ">=20"

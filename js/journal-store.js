@@ -40,7 +40,19 @@ __fluffyModules["journal-store.js"] = (() => {
         const source = Array.isArray(current) ? current : (Array.isArray(legacy) ? legacy : []).filter(r => r && typeof r === "object").map(r => ({
             id: r.id, category: "sport", data: r, createdAt: r.createdAt, source: r.source || "manual"
         }));
-        return source.filter(r => {
+        // 读取旧版时仅迁移内存对象；旧情绪分数/维生素不会再显示或被导出。
+        return source.map(r => {
+            if (!r || typeof r !== "object")
+                return r;
+            try {
+                const context = { recordDate: r.data?.recordDate || dayKey(new Date(r.createdAt)) };
+                const checked = validate(r.category, r.data || {}, true, context);
+                return checked.ok ? { ...r, data: checked.value } : r;
+            }
+            catch {
+                return r;
+            }
+        }).filter(r => {
             try {
                 return r && typeof r.id === "string" && Number.isFinite(Date.parse(r.createdAt)) && validate(r.category, r.data || {}).ok;
             }

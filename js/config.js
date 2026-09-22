@@ -1,5 +1,9 @@
 /* 只包含公开配置。不要在此文件或仓库中填写 API Key。 */
 window.FLuffyConfig = Object.freeze({
+    // 百炼默认北京地域。其他地域修改此公开端点，Key 不通用，不自动跨地域探测。
+    bailianBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    bailianVisionModel: "qwen3-vl-plus",
+    bailianAudioModel: "qwen3-omni-flash",
     model: "deepseek-flash",
     speechLanguage: "zh-CN",
     // GitHub Pages 为静态站点，直接请求官方 API；同样适用于本地预览。

@@ -7,3 +7,9 @@ __pycache__/
 *.pyc
 tests/*results*.json
 tests/*report*.json
+
+# 私人评测材料不得提交
+*.local.json
+*.wav
+*.pcm
+private-audio/
