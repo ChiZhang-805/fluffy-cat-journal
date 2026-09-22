@@ -2,6 +2,7 @@ __fluffyModules["journal-store.js"] = (() => {
     "use strict";
     const KEY = "fluffy-six-journal-v1", TASKS_KEY = "fluffy-six-tasks-v1";
     const { validate, category } = __fluffyModules["catalog.js"];
+    const Dates = __fluffyModules["sleep-time.js"];
     /**
      * 输入：key、fallback。
      * 输出：解析结果或默认值。
@@ -40,40 +41,34 @@ __fluffyModules["journal-store.js"] = (() => {
         const source = Array.isArray(current) ? current : (Array.isArray(legacy) ? legacy : []).filter(r => r && typeof r === "object").map(r => ({
             id: r.id, category: "sport", data: r, createdAt: r.createdAt, source: r.source || "manual"
         }));
-        // 读取旧版时仅迁移内存对象；旧情绪分数/维生素不会再显示或被导出。
-        return source.map(r => {
-            if (!r || typeof r !== "object")
-                return r;
+        // 阶段一：旧记录只在内存补出recordDate，不更改真实创建时间或删除历史数据。
+        const normalized = [];
+        for (const r of source) {
+            if (!r || typeof r.id !== "string" || !Number.isFinite(Date.parse(r.createdAt))) continue;
             try {
-                const context = { recordDate: r.data?.recordDate || dayKey(new Date(r.createdAt)) };
-                const checked = validate(r.category, r.data || {}, true, context);
-                return checked.ok ? { ...r, data: checked.value } : r;
-            }
-            catch {
-                return r;
-            }
-        }).filter(r => {
-            try {
-                return r && typeof r.id === "string" && Number.isFinite(Date.parse(r.createdAt)) && validate(r.category, r.data || {}).ok;
-            }
-            catch {
-                return false;
-            }
-        }).slice(0, 400);
+                const recordDate = dateOf(r), checked = validate(r.category, r.data || {}, true, { recordDate });
+                if (checked.ok) normalized.push({ ...r, recordDate, data: checked.value });
+            } catch { /* 损坏的单条记录不会阻断其他记录读取。 */ }
+        }
+        // 阶段二：按事情发生日排序；今天补记上周，不得挤掉首页最近那天的摘要。
+        return sortRecords(normalized).slice(0, 400);
     }
+
     /**
      * 输入：record（已确认记录）。
      * 输出：是否成功。
      * 功能：同一 ID 幂等保存，不随动画重播重复添加；不持久化照片或密钥。
      */
     function save(record) {
-        const checked = validate(record.category, record.data);
-        if (!checked.ok)
-            return false;
+        if (!record || typeof record.id !== "string" || !Number.isFinite(Date.parse(record.createdAt))) return false;
+        const recordDate = dateOf(record);
+        if (!Dates.validDate(recordDate) || recordDate > dayKey() || (record.recordDate && !Dates.validDate(record.recordDate))) return false;
+        const checked = validate(record.category, record.data, true, { recordDate });
+        if (!checked.ok) return false;
         const safe = {
-            id: record.id, category: record.category, data: checked.value, createdAt: record.createdAt, source: record.source || "manual", estimated: Boolean(record.estimated), focus: record.focus || null
+            id: record.id, category: record.category, data: checked.value, recordDate, createdAt: record.createdAt, updatedAt: new Date().toISOString(), source: record.source || "manual", estimated: Boolean(record.estimated), focus: record.focus || null
         };
-        return write(KEY, [safe, ...records().filter(item => item.id !== record.id)].slice(0, 400));
+        return write(KEY, sortRecords([safe, ...records().filter(item => item.id !== record.id)]).slice(0, 400));
     }
     /**
      * 输入：id（记录 ID）。
@@ -91,15 +86,21 @@ __fluffyModules["journal-store.js"] = (() => {
     function dayKey(date = new Date()) {
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     }
+    /** 输入：record（新记录或旧记录）。输出：本地日历日期键。功能：事情发生日独立于写入时间，兼容原来的睡眠日期。 */
+    function dateOf(record) {
+        return Dates.validDate(record.recordDate) || Dates.validDate(record.data?.recordDate) || Dates.validDate(record.data?.wakeDate) || dayKey(new Date(record.createdAt));
+    }
+    /** 输入：记录数组。输出：新排序数组。功能：按记录日倒序、同日按创建时间倒序，不修改调用者数组。 */
+    function sortRecords(list) { return [...list].sort((a,b) => dateOf(b).localeCompare(dateOf(a)) || Date.parse(b.createdAt)-Date.parse(a.createdAt)); }
     /**
      * 输入：list（历史）。
      * 输出：今日类别数、记录总数和陪伴天数。
      * 功能：用真实数据驱动顶部信息条，不创建虚假健康评分。
      */
     function stats(list = records()) {
-        const today = dayKey(), days = new Set(list.map(r => dayKey(new Date(r.createdAt))));
+        const today = dayKey(), days = new Set(list.map(dateOf));
         return {
-            today: new Set(list.filter(r => dayKey(new Date(r.createdAt)) === today).map(r => r.category)).size, count: list.length, days: days.size, minutes: Math.round(list.filter(r => r.category === "focus").reduce((s, r) => s + (r.focus?.elapsedMs || 0), 0) / 60000)
+            today: new Set(list.filter(r => dateOf(r) === today).map(r => r.category)).size, count: list.length, days: days.size, minutes: Math.round(list.filter(r => r.category === "focus").reduce((s, r) => s + (r.focus?.elapsedMs || 0), 0) / 60000)
         };
     }
     /**
@@ -128,6 +129,6 @@ __fluffyModules["journal-store.js"] = (() => {
         return write(TASKS_KEY, tasks().filter(t => t.id !== id));
     }
     return {
-        read, write, records, save, remove, dayKey, stats, tasks, saveTask, removeTask, KEY, TASKS_KEY
+        read, write, records, save, remove, dayKey, dateOf, sortRecords, stats, tasks, saveTask, removeTask, KEY, TASKS_KEY
     };
 })();

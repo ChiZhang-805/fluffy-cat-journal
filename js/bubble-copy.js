@@ -58,6 +58,11 @@ __fluffyModules["bubble-copy.js"] = (() => {
         node.textContent = copy.text;
         node.classList.toggle("error", error);
         node.dataset.lines = String(copy.text.split("\n").length);
+        const locale = __fluffyModules["entry-i18n.js"];
+        if(locale?.language()==="en") {
+            node.textContent=locale.bubble(ALIASES[String(text||"").trim()]||String(text||"").trim(),copy.text);
+            node.dataset.lines=String(node.textContent.split("\n").length);
+        }
         return copy.detail;
     }
     return { COPY, prepare, render };

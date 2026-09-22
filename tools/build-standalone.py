@@ -38,4 +38,4 @@ def build(output: Path) -> None:
 
 
 if __name__ == '__main__':
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'Fluffy-Cat-Recap-v7.html')
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'Fluffy-Cat-v8.html')

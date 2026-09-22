@@ -7,6 +7,8 @@ __fluffyModules["app.js"] = (() => {
     const { BailianSettings } = __fluffyModules["bailian-settings.js"];
     const { AudioSession } = __fluffyModules["audio-session.js"];
     const Sleep = __fluffyModules["sleep-time.js"];
+    const Locale = __fluffyModules["entry-i18n.js"];
+    const { EntryMenu } = __fluffyModules["entry-menu.js"];
     const { TimeRangePicker } = __fluffyModules["time-range-picker.js"];
     const { FormLayout } = __fluffyModules["form-layout.js"];
     const BubbleCopy = __fluffyModules["bubble-copy.js"];
@@ -47,7 +49,7 @@ __fluffyModules["app.js"] = (() => {
     const api = new DeepSeekClient({ config: CONFIG, model: CONFIG.model });
     const bailian = new BailianClient({ config: CONFIG });
     const state = {
-        recordDate: Sleep.dateKey(), sleepDates: {}, emotionDraft: null, voiceBackend: "text",
+        recordDate: Sleep.dateKey(), draftDates: {}, editingId: null, sleepDates: {}, emotionDraft: null, voiceBackend: "text",
         category: "sport", phase: "idle", serial: 0, task: null, record: null, source: "manual", estimated: false, versions: {}, drafts: {}, keySerial: 0, keyTask: null, filter: "all", sheetClose: null, focusRecord: null, timerNotified: false, taskId: null
     };
     const animation = new CompanionAnimation({ onReady, onRender: renderExtras, synchronize: synchronizeUI });
@@ -57,7 +59,7 @@ __fluffyModules["app.js"] = (() => {
     });
     const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
     let activeSpeech = speech, bailianSettings;
-    let timeRange = null, formLayout = null, review = null;
+    let timeRange = null, formLayout = null, review = null, entryMenu = null;
     let gesture, board, toastTimer, homeBubbleTimer, cameraVideo = null, sheetReturn = null, wave = Array(72).fill(0), lastTimerText = "", lastUI = "", lastFocusSave = 0;
     /**
      * 输入：文字、error。
@@ -65,7 +67,9 @@ __fluffyModules["app.js"] = (() => {
      * 功能：在猫咪右上角给出简短状态，不常驻冗余说明。
      */
     function bubble(text, error = false) {
+        state.bubbleText = text;
         const detail = BubbleCopy.render($("entry-bubble"), text, error);
+        $("entry-bubble").dataset.language = Locale.language();
         if (detail) toast(detail);
     }
     /**
@@ -75,7 +79,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function toast(text) {
         clearTimeout(toastTimer);
-        $("phone-toast").textContent = text;
+        $("phone-toast").textContent = Locale.message(text);
         $("phone-toast").hidden = false;
         toastTimer = setTimeout(() => {
             $("phone-toast").hidden = true;
@@ -100,12 +104,13 @@ __fluffyModules["app.js"] = (() => {
      */
     function showSheet(title, builder, onClose = null) {
         timeRange?.close(false);
+        entryMenu?.close(false);
         closeSheet(false);
         board?.cancel();
         gesture?.disarm();
         sheetReturn = document.activeElement;
         state.sheetClose = onClose;
-        $("sheet-title").textContent = title;
+        $("sheet-title").textContent = Locale.t(title);
         $("sheet-body").replaceChildren();
         $("sheet-layer").hidden = false;
         builder?.($("sheet-body"));
@@ -172,6 +177,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function navigate(scene, options = {}) {
         if (review?.active) review.leave();
+        entryMenu?.close(false);
         timeRange?.close(false);
         if (animation.scene === "entry")
             preserveDraft();
@@ -214,19 +220,92 @@ __fluffyModules["app.js"] = (() => {
         photo.clear();
         state.category = id;
         state.record = record;
-        state.recordDate = record?.data?.recordDate || record?.data?.wakeDate || (record ? Sleep.dateKey(new Date(record.createdAt)) : Sleep.dateKey());
+        state.editingId = record?.id || null;
+        state.recordDate = record ? Store.dateOf(record) : Sleep.validDate(values?.recordDate) || state.draftDates[id] || Sleep.dateKey();
         state.sleepDates = id === "sleep" && record ? { bedDate: record.data.bedDate || Sleep.validDate(String(record.data.bedtime).split("T")[0]), wakeDate: record.data.wakeDate || Sleep.validDate(String(record.data.wakeTime).split("T")[0]) } : {};
         state.emotionDraft = null;
         state.taskId = null;
+        state.editingFocus = record?.focus ? { ...record.focus, plannedMs: Object.prototype.hasOwnProperty.call(record.focus, "plannedMs") ? record.focus.plannedMs : record.focus.provenance === "self-reported" ? null : Number(record.data.durationMinutes) * 60000 } : null;
         state.estimated = Boolean(record?.estimated);
         state.source = "manual";
         const stored = values || state.drafts[id] || {};
-        const initial = id === "sport" ? Catalog.sportData(stored) : stored;
+        const initial = id === "sport" ? Catalog.sportData(stored) : id === "focus" && state.editingFocus ? { ...stored, durationMinutes: Number((state.editingFocus.elapsedMs / 60000).toFixed(2)) } : stored;
         if (id === "sleep" && !record)
             state.sleepDates = { bedDate: initial.bedDate || "", wakeDate: initial.wakeDate || "" };
         renderForm(initial);
         navigate("entry");
         bubble(Catalog.category(id).greeting);
+    }
+    /** 输入：无。输出：无。功能：在六类表单原节点上切换标签/占位/按钮，保留用户值、照片、滚动与校验状态。 */
+    function applyEntryLanguage() {
+        const id = state.category, past = state.recordDate !== Sleep.dateKey(), retrospective = id === "focus" && (past || Boolean(state.editingId));
+        document.documentElement.lang = Locale.language() === "en" ? "en" : "zh-CN";
+        $("screen").dataset.language = Locale.language();
+        $("entry-heading").querySelector("h1").textContent = Locale.title(id, past);
+        for (const field of Catalog.category(id).fields) {
+            const input = $(`field-${field.key}`), label = input?.closest(".field");
+            if (!input || !label) continue;
+            const name = label.querySelector(".field-name");
+            if (name) name.textContent = Locale.t(retrospective && field.key === "durationMinutes" ? "专注时长" : field.label);
+            input.placeholder = Locale.t(field.placeholder || ""); input.setAttribute("aria-label",Locale.t(retrospective && field.key === "durationMinutes" ? "专注时长" : field.label));
+            const unit = label.querySelector(".unit"); if(unit)unit.textContent=Locale.t(field.unit);
+            label.querySelectorAll(".choice-pill").forEach(b=>b.textContent=Locale.t(b.dataset.value));
+            const estimate = label.querySelector(".estimate-time"); if(estimate){estimate.textContent=Locale.t("让小猫估时");estimate.hidden=retrospective;}
+        }
+        if(timeRange) {
+            timeRange.element.querySelector(".field-header").textContent=Locale.t("睡眠时间");
+            for(const b of timeRange.triggers)b.setAttribute("aria-label",Locale.language()==="en"?`${Locale.t(b.dataset.key==="bedtime"?"入睡时间":"醒来时间")} ${Locale.t(Number(b.dataset.part)===0?"小时":"分钟选择")}`:`${b.dataset.key==="bedtime"?"入睡":"醒来"}${Number(b.dataset.part)===0?"小时":"分钟"}`);
+        }
+        $("entry-form").querySelectorAll(".photo-tool span").forEach((n,i)=>n.textContent=Locale.t(i===0?"拍照":"选择照片"));
+        const summary=$("entry-form").querySelector(".nutrition-details summary");if(summary)summary.textContent=Locale.t("营养信息 · 估算");
+        const placeholder=$("photo-preview")?.querySelector(".photo-empty span");if(placeholder)placeholder.textContent=Locale.t("等待照片");
+        const analyze=$("analyze-photo")?.querySelector("span");if(analyze)analyze.textContent=Locale.t("让小猫看看");
+        const remove=$("photo-preview")?.querySelector(".photo-remove");if(remove){remove.textContent=Locale.t("移除","Remove");remove.setAttribute("aria-label",Locale.t("移除照片"));}
+        $("back").setAttribute("aria-label",Locale.t("返回"));$("cancel-voice").textContent=Locale.t("取消");$("edit-record").textContent=Locale.t("修改记录");
+        $("entry-panel").setAttribute("aria-label",Locale.t("填写生活记录","Journal entry"));
+        $("confirm-entry").setAttribute("aria-label",Locale.t("确认并继续；长按可以说话","Confirm and continue; hold to speak"));
+        $("hold-help").textContent=Locale.t("点击提交手动记录；长按说话，松开后整理。","Tap to confirm. Hold to speak, release to finish. Hold Space with the keyboard; Escape cancels.");
+        entryMenu?.sync(); formLayout?.schedule();
+    }
+    /** 输入：code（zh或en）。输出：无。功能：语言偏好贯穿六类记录与回顾；不重置录入、不调用模型翻译原文。 */
+    function changeLanguage(code) {
+        if (["listening","requesting","authorizing"].includes(state.phase)) return;
+        cancelWork(false); timeRange?.close(false); Locale.setLanguage(code);
+        if(review)review.lang=Locale.language();
+        applyEntryLanguage();bubble(state.bubbleText || Catalog.category(state.category).greeting);
+        homeBubble("home");animation.render();
+    }
+    /** 输入：date（YYYY-MM-DD）。输出：是否应用。功能：切换事情发生日并清理旧睡眠日期；终止迟到请求但保留当前字段和图片。 */
+    function changeRecordDate(date) {
+        if(!Sleep.validDate(date)){toast(Locale.t("日期无效，请重新选择。"));return false;}
+        if(date>Sleep.dateKey()){toast(Locale.t("不能补记未来的日期。"));return false;}
+        if(["listening","requesting","authorizing"].includes(state.phase)){toast(Locale.t("请先完成或取消当前语音输入。"));return false;}
+        if(date!==state.recordDate){cancelWork(false);state.recordDate=date;state.sleepDates={};preserveDraft();}
+        applyEntryLanguage();animation.render();return true;
+    }
+    /** 输入：record。输出：展示用行数组。功能：只翻译固定行标题，保留用户原文和实际数值。 */
+    function localizedRows(record) {
+        const rows=Catalog.rows(record);if(Locale.language()!=="en")return rows;
+        const labels={"早餐":"Breakfast","午餐":"Lunch","晚餐":"Dinner","加餐":"Snack","Nutrition · 估算":"Nutrition","My feeling · 自评":"My feeling"};
+        return rows.map(r=>({...r,label:labels[r.label]||r.label,value:r.value.replace(/^约 /,"~ ").replace(/^份量未记录$/,"Portion not recorded").replace(/^未填写备注$/,"No note added").replace(/^未填写事件$/,"No event added").replace(/^未填写外观观察$/,"No observation added")}));
+    }
+    /** 输入：record（过去日期的专注草稿）。输出：无。功能：补记需用户确认实际用时，不把现在计时冒充过去；记录来源明确标注自述。 */
+    function confirmPastFocus(record) {
+        showSheet(Locale.t(state.editingId ? "修改专注" : "补记专注"), root=>{
+            const text=Locale.t(`${Locale.dateLabel(record.recordDate)}，专注 ${record.data.durationMinutes} 分钟。`,`${Locale.dateLabel(record.recordDate)} · ${record.data.durationMinutes} minutes focused.`);
+            root.append(el("p","past-focus-copy",record.data.task),el("p","past-focus-detail",text));
+            const save=el("button","date-confirm-focus",Locale.t(state.editingId ? "保存修改" : "保存补记"));save.type="button";
+            save.onclick=()=>{
+                // 阶段一：修改日期/文字保留计时来源；显式改时长则标为自述，不伪装成计时器测得。
+                const old=state.editingFocus, elapsedMs=Math.round(record.data.durationMinutes*60000);
+                const changed=Boolean(old)&&Math.abs(old.elapsedMs-elapsedMs)>1000;
+                const focus=old ? { ...old, elapsedMs:changed?elapsedMs:old.elapsedMs, provenance:changed?"self-reported":old.provenance||"timer" } : {elapsedMs,restMs:0,plannedMs:null,taskCompleted:false,reachedTarget:false,provenance:"self-reported"};
+                state.record={...record,source:state.editingId?record.source:"manual-backfill",focus};
+                // 阶段二：先确保存储成功，再进入原来的庆祝；不启动当前时间的倒计时。
+                if(!Store.save(state.record)){toast("本机暂时无法保存，记录仍在当前页面。");return;}
+                state.drafts.focus={};delete state.draftDates.focus;state.editingId=null;closeSheet(false);animation.setRecord(state.record);animation.saved=true;navigate("celebrate");
+            };root.append(save);
+        });
     }
     /**
      * 输入：无。
@@ -244,7 +323,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function preserveDraft() {
         if ($("entry-form").dataset.category === state.category)
-            state.drafts[state.category] = rawForm();
+            { state.drafts[state.category] = rawForm(); state.draftDates[state.category] = state.recordDate; }
     }
     /**
      * 输入：fields、snapshot（请求开始版本）。
@@ -288,7 +367,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：统一全宽字段、预设单位、范围、选择及最长字数。
      */
     function makeField(field, value) {
-        const label = el("label", "field"), head = el("span", "field-header"), name = el("span", "", field.label);
+        const label = el("label", "field"), head = el("span", "field-header"), name = el("span", "field-name", Locale.t(field.label));
         label.dataset.field = field.key;
         head.append(name);
         label.append(head);
@@ -301,12 +380,12 @@ __fluffyModules["app.js"] = (() => {
         input.name = field.key;
         input.autocomplete = "off";
         input.value = field.type === "time" && value ? Sleep.clock(value) : value ?? field.initial ?? "";
-        input.setAttribute("aria-label", field.label);
+        input.setAttribute("aria-label", Locale.t(field.label));
         if (field.max)
             input.maxLength = field.max;
         if (field.required)
             input.required = true;
-        input.placeholder = field.placeholder || "";
+        input.placeholder = Locale.t(field.placeholder || "");
         if (field.type === "choice") {
             input.type = "hidden";
             label.append(input);
@@ -314,7 +393,7 @@ __fluffyModules["app.js"] = (() => {
             choices.setAttribute("role", "group");
             choices.setAttribute("aria-label", field.label);
             field.options.forEach(value => {
-                const b = el("button", "choice-pill", value);
+                const b = el("button", "choice-pill", Locale.t(value));
                 b.type = "button";
                 b.dataset.value = value;
                 b.onclick = () => {
@@ -338,14 +417,14 @@ __fluffyModules["app.js"] = (() => {
             }
             if (field.unit) {
                 const wrap = el("span", "input-wrap");
-                wrap.append(input, el("span", "unit", field.unit));
+                wrap.append(input, el("span", "unit", Locale.t(field.unit)));
                 label.append(wrap);
             }
             else
                 label.append(input);
         }
         if (field.estimate) {
-            const b = el("button", "estimate-time", "让小猫估时");
+            const b = el("button", "estimate-time", Locale.t("让小猫估时"));
             b.type = "button";
             b.onclick = estimateTime;
             head.append(b);
@@ -378,7 +457,7 @@ __fluffyModules["app.js"] = (() => {
         form.dataset.category = state.category;
         state.versions = {};
         $("entry-panel").scrollTop = 0;
-        $("entry-heading").querySelector("h1").textContent = def.title;
+        $("entry-heading").querySelector("h1").textContent = Locale.title(state.category, state.recordDate !== Sleep.dateKey());
         // 阶段二：照片相关入口仅给饮食/面部；点击分析前不联网。
         if (def.photo) {
             const preview = el("div", "photo-preview");
@@ -442,7 +521,8 @@ __fluffyModules["app.js"] = (() => {
             }
         }
         formLayout = new FormLayout($("entry-panel"), form);
-        $("speech-transcript").textContent = `说说今天的${def.name}吧。`;
+        $("speech-transcript").textContent = Locale.t(`说说这一天的${def.name}吧。`, "Tell me about this little moment.");
+        applyEntryLanguage();
     }
     /**
      * 输入：errors。
@@ -484,9 +564,9 @@ __fluffyModules["app.js"] = (() => {
      */
     function snapshot(data, source = "manual") {
         const r = {
-            id: state.record?.id || (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`), category: state.category, data: { ...data }, createdAt: state.record?.createdAt || new Date().toISOString(), source, estimated: state.estimated
+            id: state.editingId || (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`), category: state.category, data: { ...data }, recordDate: state.recordDate, createdAt: state.record?.createdAt || new Date().toISOString(), source, estimated: state.estimated
         };
-        r.displayRows = Catalog.rows(r);
+        r.displayRows = localizedRows(r);
         return Object.freeze(r);
     }
     /**
@@ -510,6 +590,7 @@ __fluffyModules["app.js"] = (() => {
         cancelWork(false);
         document.activeElement?.blur();
         if (state.category === "focus") {
+            if (state.recordDate < Sleep.dateKey() || state.editingId) { confirmPastFocus(state.record); return; }
             beginFocus(state.record);
             return;
         }
@@ -530,6 +611,8 @@ __fluffyModules["app.js"] = (() => {
                 return;
             }
             state.drafts[state.category] = {};
+            delete state.draftDates[state.category];
+            state.editingId = null;
             photo.clear();
             animation.saved = true;
             animation.actor.companionPet = 0;
@@ -547,6 +630,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function openReview(record) {
         navigate("review");
+        review.lang = Locale.language();
         review.open(record);
     }
     /**
@@ -569,8 +653,8 @@ __fluffyModules["app.js"] = (() => {
         animation.entryMode = phase === "thinking" ? "thinking" : ["listening", "requesting"].includes(phase) ? "listening" : "idle";
         $("confirm-entry").classList.toggle("holding", phase === "listening");
         $("confirm-entry").dataset.pending = String(phase === "thinking");
-        $("voice-overline").textContent = phase === "thinking" ? "小猫正在整理" : phase === "requesting" ? "等待麦克风" : "正在听你说";
-        $("voice-hint").textContent = phase === "thinking" ? "整理好后，你可以修改每个字段" : "松开，交给我整理";
+        $("voice-overline").textContent = Locale.t(phase === "thinking" ? "小猫正在整理" : phase === "requesting" ? "等待麦克风" : "正在听你说");
+        $("voice-hint").textContent = Locale.t(phase === "thinking" ? "整理好后，你可以修改每个字段" : "松开，交给我整理");
         animation.render();
     }
     /**
@@ -645,8 +729,8 @@ __fluffyModules["app.js"] = (() => {
             }
             state.voiceVersions = { ...state.versions };
             wave = Array(72).fill(0);
-            $("speech-transcript").textContent = `说说今天的${Catalog.category(state.category).name}吧。`;
-            await activeSpeech.start({ language: CONFIG.speechLanguage, maximumSeconds: CONFIG.maximumSpeechSeconds });
+            $("speech-transcript").textContent = Locale.t(`说说这一天的${Catalog.category(state.category).name}吧。`, "Tell me about this little moment.");
+            await activeSpeech.start({ language: Locale.language() === "en" ? "en-US" : CONFIG.speechLanguage, maximumSeconds: CONFIG.maximumSpeechSeconds });
         }
         catch (error) {
             if (serial === state.serial)
@@ -725,7 +809,9 @@ __fluffyModules["app.js"] = (() => {
             state.estimated = draft.estimated;
             const protectedCount = fillForm(draft.fields, version);
             if (id === "sleep" && version.bedtime === state.versions.bedtime && version.wakeTime === state.versions.wakeTime)
-                state.sleepDates = draft.sleepDates || {};
+                state.sleepDates = draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate ? {} : draft.sleepDates || {};
+            if(id === "sleep" && draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate)
+                draft.warnings.push(Locale.t("语音里提到另一个日期，请在菜单里核对记录日期。", "Your words mention a different date. Check Record date in the menu."));
             state.emotionDraft = draft.emotion || null;
             if (protectedCount)
                 draft.warnings.push("已保留你刚才手动修改的内容。");
@@ -753,7 +839,7 @@ __fluffyModules["app.js"] = (() => {
         }
         if (note) {
             note.hidden = false;
-            note.textContent = warnings.length ? warnings.join(" ") : "整理好了，请核对。";
+            note.textContent = warnings.length ? warnings.map(Locale.message).join(" ") : Locale.t("整理好了，请核对。");
             $("entry-panel").scrollTop = 0;
         }
     }
@@ -814,12 +900,12 @@ __fluffyModules["app.js"] = (() => {
             formLayout?.schedule();
             const placeholder = el("span", "photo-empty");
             placeholder.innerHTML = icon("photo");
-            placeholder.append(el("span", "", "等待照片"));
+            placeholder.append(el("span", "", Locale.t("等待照片")));
             preview.append(placeholder);
             return;
         }
         const img = el("img");
-        img.alt = state.category === "face" ? "本次面部照片" : "本次食物照片";
+        img.alt = Locale.t(state.category === "face" ? "本次面部照片" : "本次食物照片", state.category === "face" ? "Your check-in photo" : "Your meal photo");
         /**
          * 输入：无。
          * 输出：无。
@@ -831,9 +917,9 @@ __fluffyModules["app.js"] = (() => {
         }
         img.onload = fitPhoto;
         img.src = image;
-        const clear = el("button", "photo-remove", "移除");
+        const clear = el("button", "photo-remove", Locale.t("移除", "Remove"));
         clear.type = "button";
-        clear.setAttribute("aria-label", "移除照片");
+        clear.setAttribute("aria-label", Locale.t("移除照片"));
         clear.onclick = () => { cancelWork(false); photo.clear(); showPhoto(null); };
         preview.append(img, clear);
         requestAnimationFrame(fitPhoto);
@@ -852,10 +938,10 @@ __fluffyModules["app.js"] = (() => {
             cameraVideo.muted = true;
             cameraVideo.playsInline = true;
             b.append(cameraVideo);
-            status = el("p", "camera-status", "正在等待摄像头…");
+            status = el("p", "camera-status", Locale.t("正在等待摄像头…"));
             b.append(status);
             const row = el("div", "sheet-buttons");
-            const capture = el("button", "solid", "拍下这一张"), pick = el("button", "", "选择照片");
+            const capture = el("button", "solid", Locale.t("拍下这一张")), pick = el("button", "", Locale.t("选择照片"));
             capture.onclick = () => {
                 try {
                     const image = photo.capture(cameraVideo);
@@ -1018,6 +1104,7 @@ __fluffyModules["app.js"] = (() => {
             return;
         }
         Store.write("fluffy-active-focus-v1", null);
+        state.drafts.focus = {}; delete state.draftDates.focus; state.editingId = null;
         animation.setRecord(state.record);
         animation.saved = true;
         navigate("celebrate");
@@ -1098,7 +1185,7 @@ __fluffyModules["app.js"] = (() => {
         }
         let day = "";
         for (const r of list) {
-            const d = Store.dayKey(new Date(r.createdAt));
+            const d = Store.dateOf(r);
             if (d !== day) {
                 root.append(el("h2", "history-day", d));
                 day = d;
@@ -1106,7 +1193,7 @@ __fluffyModules["app.js"] = (() => {
             const c = Catalog.category(r.category), s = Catalog.summary(r), b = el("button", "history-item"), badge = el("span", "category-badge"), copy = el("span", "history-copy");
             badge.innerHTML = icon(c.icon);
             copy.append(el("strong", "", c.name + " · " + s.value), el("span", "", s.sub));
-            b.append(badge, copy, el("small", "", new Date(r.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })));
+            b.append(badge, copy, el("small", "", Store.dateOf(r) !== Store.dayKey(new Date(r.createdAt)) ? Locale.t("补记","Added later") : new Date(r.createdAt).toLocaleTimeString(Locale.language()==="en"?"en-US":"zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })));
             b.onclick = () => recordDetails(r);
             root.append(b);
         }
@@ -1119,6 +1206,7 @@ __fluffyModules["app.js"] = (() => {
     function recordDetails(record) {
         showSheet(Catalog.category(record.category).name + "手记", b => {
             const dl = el("dl");
+            const dateRow = el("div","detail-row");dateRow.append(el("dt","",Locale.t("记录日期")),el("dd","",Locale.dateLabel(Store.dateOf(record))));dl.append(dateRow);
             for (const f of Catalog.category(record.category).fields) {
                 const v = record.data[f.key];
                 if (v == null || v === "")
@@ -1137,12 +1225,10 @@ __fluffyModules["app.js"] = (() => {
                 b.append(el("p", "detail-note", "营养是估算，不是精确测量；以补充的份量与实际标签为准。"));
             if (record.category === "face")
                 b.append(el("p", "detail-note", "外观观察受光照与角度影响；不代表实际疲劳或医学诊断。"));
-            if (record.category !== "focus")
-                sheetAction(b, "修改这条记录", "edit", () => {
-                    closeSheet(false);
-                    openEntry(record.category, record.data, record);
-                });
-            else
+            sheetAction(b, "修改这条记录", "edit", () => {
+                closeSheet(false); openEntry(record.category, record.data, record);
+            });
+            if (record.category === "focus")
                 sheetAction(b, "再专注一次", "focus", () => {
                     closeSheet(false);
                     openEntry("focus", record.data);
@@ -1325,7 +1411,9 @@ __fluffyModules["app.js"] = (() => {
                         return;
                     fillForm(draft.fields);
                     if (selected === "sleep")
-                        state.sleepDates = draft.sleepDates || {};
+                        state.sleepDates = draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate ? {} : draft.sleepDates || {};
+                    if (selected === "sleep" && draft.sleepDates?.wakeDate && draft.sleepDates.wakeDate !== state.recordDate)
+                        draft.warnings.push(Locale.t("描述里提到另一个日期，请在菜单里核对记录日期。", "Your words mention a different date. Check Record date in the menu."));
                     state.emotionDraft = draft.emotion || null;
                     state.source = "text-ai";
                     state.estimated = draft.estimated;
@@ -1474,11 +1562,12 @@ __fluffyModules["app.js"] = (() => {
         // 阶段三：按钮绑定真实阶段；书写与放笔结束后才可以庆祝。
         $("primary").classList.toggle("white", hero);
         $("primary").disabled = !a.ready || (hero ? a.time < 4.93 : record ? a.time < a.writeEnd + 3.5 : false);
-        $("primary-label").textContent = hero ? "完成" : "继续";
+        $("primary-label").textContent = Locale.t(hero ? "完成" : "继续");
         $("confirm-entry").disabled = !a.ready || ["authorizing"].includes(state.phase);
-        $("confirm-label").textContent = ({
-            idle: state.category === "focus" ? "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "停止整理"
-        })[state.phase];
+        $("confirm-label").textContent = Locale.t(({
+            idle: state.category === "focus" ? state.editingId ? "保存修改" : state.recordDate < Sleep.dateKey() ? "补记专注" : "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "停止整理"
+        })[state.phase]);
+        entryMenu?.sync();
         $("hero-quote").style.opacity = M.range(a.time, 1.5, 2.5);
         $("hero-subtitle").style.opacity = M.range(a.time, .8, 1.5);
         $("pet").hidden = !(record || hero);
@@ -1619,8 +1708,13 @@ __fluffyModules["app.js"] = (() => {
         });
         // 新模块只在回顾页挂载；记录页的表单、按钮和语音提取流程不改变。
         review = new __fluffyModules["review.js"].ReviewPage({
-            api, bailian, animation, microphone, navigate, showSheet, closeSheet, toast,
+            api, bailian, animation, microphone, navigate, showSheet, closeSheet, toast, onLanguage:changeLanguage,
             openSettings, openBailian: () => bailianSettings.open()
+        });
+        entryMenu = new EntryMenu($("screen"), {
+            scene:()=>animation.scene,date:()=>state.recordDate,language:changeLanguage,changeDate:changeRecordDate,
+            beforeOpen:()=>{timeRange?.close(false);gesture?.disarm();if(state.phase!=="idle")cancelWork(false);},
+            recap:()=>{const id=state.category,date=state.recordDate;navigate("review");review.lang=Locale.language();review.open(id,date);}
         });
         board = new HomeBoard($("home-board"), {
             open: openEntry, warn: toast, attend: id => {
@@ -1789,7 +1883,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, review, openReview, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
+            animation, state, review, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};

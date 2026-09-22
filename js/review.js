@@ -51,6 +51,7 @@ __fluffyModules["review.js"] = (() => {
         open(record, date) {
             this.cancel(false); this.active = true; this.root.hidden = false;
             const id = typeof record === "string" ? record : record.category;
+            this.lang = __fluffyModules["entry-i18n.js"]?.language() || this.lang;
             this.view = Data.build(id, date || (typeof record === "object" ? Data.dateOf(record) : Store.dayKey()));
             this.sessionKey = `${id}:${this.view.date}`;
             if (!this.sessions.has(this.sessionKey)) this.sessions.set(this.sessionKey, []);
@@ -207,13 +208,13 @@ __fluffyModules["review.js"] = (() => {
             $("review-bubble").setAttribute("aria-label", this.t("小猫回复，点击暂停或继续", "Cat reply; tap to pause or resume"));
             const root = $("review-summary"); root.replaceChildren(); root.classList.toggle("mood-summary", view.id === "mood");
             if (view.id === "mood") {
-                root.append(node("p", "review-mood-kicker", this.t("今天的心情", "Your own words")), node("p", "review-mood-text", d.text || this.t("给心情留一点位置", "A little room for your feelings")), node("p", "review-mood-detail", d.detail || this.t("慢慢说也没关系", "There's no rush to explain")));
+                root.append(node("p", "review-mood-kicker", this.t(view.date === Store.dayKey() ? "今天的心情" : "那天的心情", "Your own words")), node("p", "review-mood-text", d.text || this.t("给心情留一点位置", "A little room for your feelings")), node("p", "review-mood-detail", d.detail || this.t("慢慢说也没关系", "There's no rush to explain")));
             } else {
                 const orbit = node("div", "review-orbit");
                 orbit.innerHTML = `<svg viewBox="0 0 138 138" aria-hidden="true"><circle class="review-ring-track" cx="69" cy="69" r="60"/><circle id="review-ring-progress" class="review-ring-progress" cx="69" cy="69" r="60"/></svg>`;
                 const content = node("div", "review-orbit-content"), score = node("strong", "review-score", d.score == null ? "—" : "0"); score.id = "review-score";
                 content.append(score, node("span", "review-score-label", this.scoreLabel()), node("span", "review-score-goal", this.goalLabel())); orbit.append(content);
-                orbit.setAttribute("aria-label", `${this.scoreLabel()} ${d.score ?? this.t("无记录", "No entry")}`);
+                orbit.setAttribute("aria-label", `${this.scoreLabel()} ${d.score ?? (d.count ? this.t("暂无分数", "No score available") : this.t("无记录", "No entry"))}`);
                 const fact = node("div", "review-facts"), badge = node("span", "review-fact-icon"); badge.innerHTML = icon(view.meta.icon);
                 fact.append(badge, node("p", "review-fact-label", this.factLabel()), node("strong", "review-fact-value", this.valueText(d)), node("span", "review-fact-detail", view.id === "sleep" ? d.detail : d.text || this.t("尚未记录", "No entry yet")));
                 root.append(orbit, fact);
@@ -227,7 +228,7 @@ __fluffyModules["review.js"] = (() => {
         /** 输入：无。输出：小字目标或记录数。功能：目标值可见，不把默认值当作用户已设定。 */
         goalLabel() { return this.view.id === "sport" ? `${Data.format(this.view.today.value)} / ${this.view.goals.sport} min` : this.view.id === "sleep" ? this.t(`目标 ${this.view.goals.sleep} 小时`, `Goal ${this.view.goals.sleep} h`) : this.t(`${this.view.today.count} 次记录`, `${this.view.today.count} entries`); }
         /** 输入：无。输出：事实标题。功能：压缩图标、标题、数值间距。 */
-        factLabel() { return this.t(({ sport: "今日运动", sleep: "睡眠时长", focus: "实际专注", food: "已记录热量", face: "留下的观察" })[this.view.id] || "今天", ({ sport: "Movement", sleep: "Sleep duration", focus: "Actual focus", food: "Logged energy", face: "Observations" })[this.view.id] || "Today"); }
+        factLabel() { return this.t(({ sport: this.view.date === Store.dayKey() ? "今日运动" : "当日运动", sleep: "睡眠时长", focus: "实际专注", food: "已记录热量", face: "留下的观察" })[this.view.id] || "今天", ({ sport: "Movement", sleep: "Sleep duration", focus: "Actual focus", food: "Logged energy", face: "Observations" })[this.view.id] || "Today"); }
         /** 输入：日汇总。输出：短数值与单位。功能：未知值留横线、部分饮食热量不称全天总摄入。 */
         valueText(d) { const value = Data.format(d.value); return `${value}${d.value == null ? "" : " " + (d.unit === "entries" ? this.t("次", "entries") : d.unit === "h" ? this.t("小时", "h") : d.unit === "min" ? this.t("分钟", "min") : d.unit)}`; }
         /** 输入：无。输出：无。功能：7天逐柱升起；情绪用无高低排序的文字足迹。 */
@@ -238,7 +239,7 @@ __fluffyModules["review.js"] = (() => {
             this.view.week.forEach((day, i) => {
                 const button = node("button", mood ? "review-mood-day" + (!day.count ? " empty" : "") : "review-bar" + (i === 6 ? " today" : "") + (day.score == null ? " missing" : ""));
                 button.type = "button"; button.style.setProperty("--i", i); button.dataset.day = day.date; button.setAttribute("aria-pressed", String(i === 6));
-                button.setAttribute("aria-label", `${day.date} ${mood ? day.text || this.t("无记录", "No entry") : day.score == null ? this.t("无记录", "No entry") : day.score + this.t("分", " points")}`);
+                button.setAttribute("aria-label", `${day.date} ${mood ? day.text || this.t("无记录", "No entry") : day.score == null ? (day.count ? this.valueText(day) + this.t("，暂无分数", ", no score available") : this.t("无记录", "No entry")) : day.score + this.t("分", " points")}`);
                 if (mood) {
                     const orb = node("span", "review-mood-orb"); orb.innerHTML = icon(day.count ? "heart" : "ring");
                     button.append(orb, node("span", "", day.date.slice(8)), node("span", "review-mood-word", day.text || "—")); chart.append(button);
@@ -276,7 +277,7 @@ __fluffyModules["review.js"] = (() => {
         languageSheet() {
             this.h.showSheet(this.t("语言切换", "Review language"), root => {
                 const row = node("div", "review-language");
-                for (const [id, name] of [["zh", "中文"], ["en", "English"]]) { const b = node("button", id === this.lang ? "selected" : "", name); b.onclick = () => { this.cancel(false); this.lang = id; Store.write("fluffy-review-language-v1", id); this.h.closeSheet(); this.render(); this.enqueue([{ text: Talk.greeting(this.view, this.lang), gesture: "soft" }]); }; row.append(b); } root.append(row);
+                for (const [id, name] of [["zh", "中文"], ["en", "English"]]) { const b = node("button", id === this.lang ? "selected" : "", name); b.onclick = () => { this.cancel(false); this.lang = id; Store.write("fluffy-review-language-v1", id); this.h.onLanguage?.(id); this.h.closeSheet(); this.render(); this.enqueue([{ text: Talk.greeting(this.view, this.lang), gesture: "soft" }]); }; row.append(b); } root.append(row);
             });
         }
         /** 输入：无。输出：规则正文。功能：说明来源与公式放菜单，不常驻显示说明面板。 */
@@ -284,11 +285,11 @@ __fluffyModules["review.js"] = (() => {
             const g = this.view.goals;
             const zh = { sport: `个人目标完成分 = 当日已记录运动分钟 ÷ 目标分钟 × 100，上限 100。当前目标 ${g.sport} 分钟，可在“调整目标”修改。初始默认目标为30分钟。没有记录的日子留空，不按零分处理。`,
                 sleep: `时长目标匹配分 = max(0, 1 − |睡眠小时 − 目标小时| ÷ 目标小时) × 100。当前目标 ${g.sleep} 小时，初始默认8小时，可自行修改。同一天多条记录取最后确认的一条。记录的时间段不等于监测得到的实际睡眠质量，不据此诊断。`,
-                focus: "专注计划完成分 = 实际专注分钟 ÷ 对应计划分钟 × 100，上限100。暂停和休息不计入实际时间。同一天多次计时合并计算；提前停止保留真实用时，不代表任务已完成。没有实际计时数据时不计算分数。",
+                focus: "专注计划完成分 = 实际专注分钟 ÷ 对应计划分钟 × 100，上限100。暂停和休息不计入实际时间。同一天多次计时合并计算；提前停止保留真实用时，不代表任务已完成。手动补记的时长会标记为自述，不冒充计时器测量；没有原计划时不补造计划完成分。没有实际时长时不计算分数。",
                 food: "饮食记录完整分按餐次、食物、份量、热量、蛋白质、碳水和脂肪7项的已填写比例计算；同日多餐取平均覆盖率。营养数值只累计已记录项，未记录项不填零。它衡量记录完整程度，不衡量饮食好坏、健康或热量是否达标。",
                 face: "外观记录完整分按自己的感受、眼周观察、皮肤外观3项的已填写比例计算；同日多次记录取平均。它不是疲劳程度、皮肤健康或外貌分数。照片分析不会根据长相判断情绪或做诊断。",
                 mood: "情绪不打高低分，也不把低落排在开心下面。心情足迹只展示你已经确认的文字；同日多次记录显示最近一条，其余保留在手记中。AI聊天不是评分依据，也不会改变你的原始描述。" };
-            const en = { sport: `Goal progress = logged movement minutes / personal goal × 100, capped at 100. Current goal: ${g.sport} min (initial default: 30). Change it in Your goal. Days without entries stay empty.`, sleep: `Sleep goal match = max(0, 1 − |logged hours − goal| / goal) × 100. Current goal: ${g.sleep} h (initial default: 8). Uses the latest entry per day. Logged duration is not a measurement of sleep quality or a diagnosis.`, focus: "Actual focused minutes / planned minutes × 100, capped at 100. Pauses and breaks do not count. Multiple sessions are combined. Stopping early records actual time, not task completion. No actual timer data means no score.", food: "Record coverage: the fraction of 7 fields completed (meal, foods, portion, calories, protein, carbs, fat), averaged across entries. Energy and nutrients include logged values only. This is not a measure of diet quality or a calorie target.", face: "Record coverage: the fraction of 3 fields completed (your feeling, eye-area observation, skin appearance), averaged across entries. It is not a fatigue, health or beauty score. Photos do not establish emotions or diagnoses.", mood: "Feelings are not ranked or scored. Each day shows your latest confirmed description. Other entries remain in your journal. AI conversation cannot alter your own words." };
+            const en = { sport: `Goal progress = logged movement minutes / personal goal × 100, capped at 100. Current goal: ${g.sport} min (initial default: 30). Change it in Your goal. Days without entries stay empty.`, sleep: `Sleep goal match = max(0, 1 − |logged hours − goal| / goal) × 100. Current goal: ${g.sleep} h (initial default: 8). Uses the latest entry per day. Logged duration is not a measurement of sleep quality or a diagnosis.`, focus: "Actual focused minutes / planned minutes × 100, capped at 100. Pauses and breaks do not count. Multiple sessions are combined. Stopping early records actual time, not task completion. Past sessions entered by the user count as self-reported minutes, not measured time; without an original plan they have no plan-progress score. No actual duration means no score.", food: "Record coverage: the fraction of 7 fields completed (meal, foods, portion, calories, protein, carbs, fat), averaged across entries. Energy and nutrients include logged values only. This is not a measure of diet quality or a calorie target.", face: "Record coverage: the fraction of 3 fields completed (your feeling, eye-area observation, skin appearance), averaged across entries. It is not a fatigue, health or beauty score. Photos do not establish emotions or diagnoses.", mood: "Feelings are not ranked or scored. Each day shows your latest confirmed description. Other entries remain in your journal. AI conversation cannot alter your own words." };
             return this.t(zh[this.view.id], en[this.view.id]);
         }
         /** 输入：无。输出：无。功能：在菜单弹层中展示实际公式和数据来源。 */

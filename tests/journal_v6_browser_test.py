@@ -111,7 +111,8 @@ async def run():
         await page.evaluate('FluffyDebug.board.reset();FluffyDebug.homeBubble("home")')
         await page.wait_for_timeout(350)
         bubble = await page.evaluate('''()=>{const b=document.querySelector('#home-bubble'),r=b.getBoundingClientRect(),s=document.querySelector('#screen').getBoundingClientRect();return {top:(r.top-s.top)/(s.width/393),bottom:(r.bottom-s.top)/(s.width/393),width:r.width/(s.width/393),text:b.textContent,clip:b.scrollWidth>b.clientWidth}}''')
-        check('首页气泡在猫耳上方且不是满格卡片', bubble['bottom'] < 519 and bubble['width'] < 112 and bubble['top'] >= 399)
+        # v8按用户新要求靠近猫咪：仅更新本条旧位置断言，保留对白形状和不裁切检查。
+        check('首页气泡靠近猫咪右上方且不是满格卡片', bubble['bottom'] < 561 and bubble['width'] < 112 and 480 <= bubble['top'] <= 495)
         check('首页气泡两行均六字且不裁切', all(len(x)==6 for x in bubble['text'].split('\n')) and not bubble['clip'])
         await capture(page,'home')
         await page.locator('.home-widget[data-category=sport]').click()

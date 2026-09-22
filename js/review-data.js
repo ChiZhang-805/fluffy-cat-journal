@@ -13,8 +13,8 @@ __fluffyModules["review-data.js"] = (() => {
     };
     /** 输入：value（任意值）。输出：有限非负数字或 null。功能：未知值不伪装成零。 */
     function number(value) { return value === "" || value == null || !Number.isFinite(Number(value)) || Number(value) < 0 ? null : Number(value); }
-    /** 输入：记录。输出：本地 YYYY-MM-DD。功能：睡眠按醒来/记录日，其他类别按实际确认日期归组。 */
-    function dateOf(record) { return /^\d{4}-\d{2}-\d{2}$/.test(record.data?.recordDate || record.data?.wakeDate || "") ? (record.data.recordDate || record.data.wakeDate) : S.dayKey(new Date(record.createdAt)); }
+    /** 输入：记录。输出：本地 YYYY-MM-DD。功能：六类都按用户选定的记录日归组，写入时间仅用于同日排序。 */
+    function dateOf(record) { return S.dateOf(record); }
     /** 输入：日期、日偏移。输出：本地日期键。功能：日历算术跨月跨年，不按固定24小时跨夏令时。 */
     function shiftDate(key, offset) { const [y, m, d] = key.split("-").map(Number); return S.dayKey(new Date(y, m - 1, d + offset, 12)); }
     /** 输入：可选任意目标。输出：经校验的目标。功能：公开默认值并容错恢复用户设置，不改变记录。 */
@@ -40,8 +40,9 @@ __fluffyModules["review-data.js"] = (() => {
         if (id === "sleep") return { ...base, value: number(data.hours), score: number(data.hours) == null ? null : Math.round(Math.max(0, 1 - Math.abs(data.hours - target.sleep) / target.sleep) * 100), scoreKind: "sleepGoal", unit: "h", text: data.quality, detail: `${data.bedtime || "—"} — ${data.wakeTime || "—"}` };
         if (id === "focus") {
             const timed = list.filter(r => number(r.focus?.elapsedMs) != null), actual = timed.length ? timed.reduce((s, r) => s + Number(r.focus.elapsedMs) / 60000, 0) : null;
-            const planned = timed.reduce((s, r) => s + (number(r.data.durationMinutes) || 0), 0);
-            return { ...base, value: actual, score: ratio(actual, planned), scoreKind: "focusGoal", unit: "min", text: data.task, detail: data.notes || "", planned, restMinutes: timed.reduce((s, r) => s + (number(r.focus.restMs) || 0) / 60000, 0) };
+            // 原计时计划独立保存；修改实际用时不把它当成原计划，旧记录才回退兼容字段。
+            const planned = timed.reduce((s, r) => s + (Object.prototype.hasOwnProperty.call(r.focus, "plannedMs") ? (number(r.focus.plannedMs) || 0) / 60000 : number(r.data.durationMinutes) || 0), 0);
+            return { ...base, value: actual, score: timed.some(r => r.focus.provenance === "self-reported") ? null : ratio(actual, planned), scoreKind: "focusGoal", unit: "min", text: data.task, detail: data.notes || "", planned, restMinutes: timed.reduce((s, r) => s + (number(r.focus.restMs) || 0) / 60000, 0) };
         }
         if (id === "food") return { ...base, value: sum(list, "calories"), score: coverage(list, ["meal", "foods", "portion", "calories", "protein", "carbs", "fat"]), scoreKind: "coverage", unit: "kcal", text: data.foods, detail: data.meal, macros: { protein: sum(list, "protein"), carbs: sum(list, "carbs"), fat: sum(list, "fat") } };
         if (id === "face") return { ...base, value: list.length, score: coverage(list, ["feeling", "eyeArea", "skinAppearance"]), scoreKind: "observation", unit: "entries", text: data.feeling, detail: data.eyeArea || data.skinAppearance || "" };
@@ -63,9 +64,9 @@ __fluffyModules["review-data.js"] = (() => {
     }
     /** 输入：回顾快照。输出：供模型读取的最少必要资料。功能：不发送其他板块、原图、密钥、记录ID或未确认表单。 */
     function context(view) {
-        return { category: view.id, date: view.date, scoring: { type: view.today.scoreKind || "none", score: view.today.score, goals: ["sport", "sleep"].includes(view.id) ? { [view.id]: view.goals[view.id] } : undefined, meaning: "Personal target / record coverage only; not health, mood or beauty assessment" },
+        return { category: view.id, date: view.date, deviceDate: S.dayKey(), historical: view.date !== S.dayKey(), scoring: { type: view.today.scoreKind || "none", score: view.today.score, goals: ["sport", "sleep"].includes(view.id) ? { [view.id]: view.goals[view.id] } : undefined, meaning: "Personal target / record coverage only; not health, mood or beauty assessment" },
             weekly: view.week.map(d => ({ date: d.date, entries: d.count, value: d.value, unit: d.unit, score: d.score, confirmedFeeling: view.id === "mood" ? d.text : undefined })),
-            confirmedRecords: view.records.slice(-30).map(r => ({ date: dateOf(r), fields: Object.fromEntries([...C.category(view.id).fields.map(f => f.key), ...(view.id === "sleep" ? ["hours", "recordDate", "bedDate", "wakeDate"] : [])].filter(k => r.data[k] != null).map(k => [k, typeof r.data[k] === "string" ? r.data[k].slice(0, 600) : r.data[k]])), actualFocus: r.focus ? { elapsedMs: r.focus.elapsedMs, restMs: r.focus.restMs } : undefined })) };
+            confirmedRecords: view.records.slice(-30).map(r => ({ date: dateOf(r), fields: Object.fromEntries([...C.category(view.id).fields.map(f => f.key), ...(view.id === "sleep" ? ["hours", "recordDate", "bedDate", "wakeDate"] : [])].filter(k => r.data[k] != null).map(k => [k, typeof r.data[k] === "string" ? r.data[k].slice(0, 600) : r.data[k]])), actualFocus: r.focus ? { elapsedMs: r.focus.elapsedMs, restMs: r.focus.restMs, plannedMs: r.focus.plannedMs, provenance: r.focus.provenance || "timer" } : undefined })) };
     }
     return { META, GOALS_KEY, number, dateOf, shiftDate, goals, saveGoals, format, ratio, daily, build, context };
 })();
