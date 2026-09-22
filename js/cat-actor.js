@@ -91,7 +91,7 @@ window.CatActor = class {
      * 输出：无。
      * 功能：用同一套极简白色五官连续表现眨眼、视线和闭眼。
      */
-    face(ctx, hero, sleep = 0, look = 0, clock = 0) {
+    face(ctx, hero, sleep = 0, look = 0, clock = 0, talk = 0) {
         ctx.save();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = hero ? 3.75 : 4.2;
@@ -124,8 +124,8 @@ window.CatActor = class {
             ctx.lineWidth = 3.5;
             ctx.beginPath();
             ctx.moveTo(191 + xshift, 317);
-            ctx.bezierCurveTo(186 + xshift, 324, 198 + xshift, 324, 202 + xshift, 320);
-            ctx.bezierCurveTo(210 + xshift, 327, 220 + xshift, 324, 217 + xshift, 317);
+            ctx.bezierCurveTo(186 + xshift, 324 + talk * 1.5, 198 + xshift, 324 + talk * 1.5, 202 + xshift, 320 + talk * .6);
+            ctx.bezierCurveTo(210 + xshift, 327 + talk * 1.5, 220 + xshift, 324 + talk * 1.5, 217 + xshift, 317);
             ctx.stroke();
         }
         ctx.restore();
@@ -311,6 +311,10 @@ window.CatActor = class {
         ctx.restore();
         const activeRest = M.point([177, 405], [138, 410], sleep);
         const activeEnd = M.point(grip, activeRest, release);
+        // 回顾对白时，短爪以肩毛下连接点为支撑抬起；其他场景参数为0，原动作不变。
+        const paw = pose.chatMotion ? (pose.pawLift || 0) : 0;
+        activeEnd[0] += paw * (7 + Math.sin(idle * 2.1) * 4);
+        activeEnd[1] -= paw * 22;
         const rootStart = [M.clamp(grip[0] - 24, 85, M.mix(218, 270, M.range(t, 10.8, 13))), 374];
         const activeRoot = M.point(rootStart, M.point([165, 374], [125, 406], sleep), release);
         const armOptions = { width: M.mix(23, 18, release) * (1 - sleep * .27), tip: M.mix(15, 13, sleep), bend: -9 * (1 - release) };
@@ -331,7 +335,7 @@ window.CatActor = class {
             const ear = Math.exp(-(((x - 250) / 28) ** 2 + ((y - 214) / 33) ** 2)), cheek = Math.exp(-(((x - 65) / 45) ** 2 + ((y - 339) / 58) ** 2)), right = Math.exp(-(((x - 296) / 30) ** 2 + ((y - 335) / 45) ** 2));
             return [x + Math.sin(idle * 1.8 - .4) * .45 * right + 10 * headSleep * ear + (pose.pet || 0) * ear * 2 + attention * ear * (2 + Math.sin(idle * 1.8)) + 26 * headSleep * cheek - 10 * headSleep * right, y + Math.sin(idle * 1.45) * .45 * M.clamp((380 - y) / 185) - 8 * headSleep * ear - attention * ear * 3 - thought * Math.sin(idle * 1.3) * .6 - 23 * headSleep * cheek - 16 * headSleep * M.clamp((y - 343) / 40)];
         });
-        this.face(ctx, false, headSleep, look, idle);
+        this.face(ctx, false, headSleep, look, idle, pose.mouthTalk || 0);
         ctx.restore();
         // 阶段三：笔尖保持真实落点，再覆盖握笔爪和收拢后的前景尾巴。
         ctx.save();
@@ -345,6 +349,10 @@ window.CatActor = class {
             ctx.clip();
             this.arm(ctx, activeRoot, activeEnd, armOptions);
             ctx.restore();
+        }
+        if (pose.chatMotion && paw > .01) {
+            // 举爪在脸颊前缘自然露出，根部仍藏在胸毛里，不拉出细长手臂。
+            this.arm(ctx, [145, 397], activeEnd, { width: 13, tip: 12, bend: paw * 2 });
         }
         this.recordTail(ctx, tailSleep, idle, true);
         if (headSleep > .88) {

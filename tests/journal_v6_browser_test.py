@@ -134,7 +134,7 @@ async def run():
         check('保存后进入庆祝',await page.evaluate('FluffyDebug.animation.scene==="celebrate"'))
         await page.evaluate('FluffyDebug.animation.time=6;FluffyDebug.animation.render()')
         await page.locator('#primary').click()
-        check('庆祝后返回首页',await page.evaluate('FluffyDebug.animation.scene==="home"'))
+        check('v7庆祝后进入对应回顾（其余v6记录行为不变）',await page.evaluate('FluffyDebug.animation.scene==="review"&&FluffyDebug.review.view.id==="sport"'))
         await page.evaluate('const s=__fluffyModules["journal-store.js"];const r=s.records().find(r=>r.id==="old-run");FluffyDebug.openEntry("sport",r.data,r)')
         check('旧公里数在编辑备注里', '3 公里' in await page.locator('#field-notes').input_value())
         check('旧备注的原感受仍保留', '轻松' in await page.locator('#field-notes').input_value())

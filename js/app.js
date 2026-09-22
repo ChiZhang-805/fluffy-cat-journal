@@ -57,7 +57,7 @@ __fluffyModules["app.js"] = (() => {
     });
     const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
     let activeSpeech = speech, bailianSettings;
-    let timeRange = null, formLayout = null;
+    let timeRange = null, formLayout = null, review = null;
     let gesture, board, toastTimer, homeBubbleTimer, cameraVideo = null, sheetReturn = null, wave = Array(72).fill(0), lastTimerText = "", lastUI = "", lastFocusSave = 0;
     /**
      * 输入：文字、error。
@@ -171,6 +171,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：集中切页与资源清理，输入草稿保留，退出摄像头/录音。
      */
     function navigate(scene, options = {}) {
+        if (review?.active) review.leave();
         timeRange?.close(false);
         if (animation.scene === "entry")
             preserveDraft();
@@ -518,7 +519,7 @@ __fluffyModules["app.js"] = (() => {
     /**
      * 输入：无。
      * 输出：无。
-     * 功能：记录书写后继续才保存；庆祝结束返回首页，不再次创建记录。
+     * 功能：记录书写后继续才保存；庆祝完成进入对应回顾，不再次创建记录。
      */
     function primaryAction() {
         if ($("primary").disabled)
@@ -535,10 +536,18 @@ __fluffyModules["app.js"] = (() => {
             navigate("celebrate");
         }
         else if (animation.scene === "celebrate") {
-            state.record = null;
-            navigate("home");
-            homeBubble("记下来了，今天也辛苦啦。");
+            if (state.record) openReview(state.record);
+            else navigate("home");
         }
+    }
+    /**
+     * 输入：record（已确认且保存的记录）。
+     * 输出：无。
+     * 功能：庆祝完成或历史入口打开相应板块的只读回顾；不再次新增记录。
+     */
+    function openReview(record) {
+        navigate("review");
+        review.open(record);
     }
     /**
      * 输入：无。
@@ -1119,6 +1128,7 @@ __fluffyModules["app.js"] = (() => {
                 dl.append(row);
             }
             b.append(dl);
+            sheetAction(b, "查看回顾", "history", () => { closeSheet(false); openReview(record); });
             if (record.focus) {
                 const p = el("p", "detail-note", `实际专注 ${Math.round(record.focus.elapsedMs / 6000) / 10} 分钟；休息 ${Math.round(record.focus.restMs / 6000) / 10} 分钟。计时结束不等于任务完成。`);
                 b.append(p);
@@ -1338,6 +1348,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：保留外部极简下拉框，不回显已有 Key。
      */
     function openSettings() {
+        if (review?.active) review.cancel(false);
         if (!$("api-popover").hidden) {
             closeSettings();
             return;
@@ -1411,6 +1422,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：清除 Key 和当前请求，不删除用户记录。
      */
     function clearKey() {
+        if (review?.active) review.cancel(false);
         state.keyTask?.abort();
         state.keySerial++;
         cancelWork(false);
@@ -1455,13 +1467,14 @@ __fluffyModules["app.js"] = (() => {
         $("record-heading").style.opacity = record ? M.range(a.time, .45, 1.5) : 0;
         $("hero-quote").hidden = !hero;
         $("hero-subtitle").hidden = !hero;
-        $("back").hidden = home || inside || hero;
+        $("back").hidden = home || inside || hero || scene === "review";
+        if (review) review.root.hidden = scene !== "review";
         $("primary").hidden = !(record || hero);
         $("confirm-entry").hidden = !entry;
         // 阶段三：按钮绑定真实阶段；书写与放笔结束后才可以庆祝。
         $("primary").classList.toggle("white", hero);
         $("primary").disabled = !a.ready || (hero ? a.time < 4.93 : record ? a.time < a.writeEnd + 3.5 : false);
-        $("primary-label").textContent = hero ? "回到首页" : "继续";
+        $("primary-label").textContent = hero ? "完成" : "继续";
         $("confirm-entry").disabled = !a.ready || ["authorizing"].includes(state.phase);
         $("confirm-label").textContent = ({
             idle: state.category === "focus" ? "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "停止整理"
@@ -1503,6 +1516,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：波形读取真音量；思考使用不同的等待标记，不冒充输入。
      */
     function renderExtras() {
+        review?.tick();
         if ($("voice-panel").hidden)
             return;
         const ctx = $("voice-wave").getContext("2d");
@@ -1601,7 +1615,12 @@ __fluffyModules["app.js"] = (() => {
         // 阶段一：首页、短按和长按各自绑定，避免一手势触发两条流程。
         document.querySelectorAll("[data-icon]").forEach(n => setIcon(n, n.dataset.icon));
         bailianSettings = new BailianSettings(bailian, CONFIG, {
-            onOpen: () => { cancelWork(false); gesture?.disarm(); closeSettings(false); }, onClear: () => cancelWork(false)
+            onOpen: () => { review?.cancel(false); cancelWork(false); gesture?.disarm(); closeSettings(false); }, onClear: () => { review?.cancel(false); cancelWork(false); }
+        });
+        // 新模块只在回顾页挂载；记录页的表单、按钮和语音提取流程不改变。
+        review = new __fluffyModules["review.js"].ReviewPage({
+            api, bailian, animation, microphone, navigate, showSheet, closeSheet, toast,
+            openSettings, openBailian: () => bailianSettings.open()
         });
         board = new HomeBoard($("home-board"), {
             open: openEntry, warn: toast, attend: id => {
@@ -1770,7 +1789,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
+            animation, state, review, openReview, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};

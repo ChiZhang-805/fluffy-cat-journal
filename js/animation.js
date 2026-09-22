@@ -137,7 +137,7 @@ __fluffyModules["animation.js"] = (() => {
          * 功能：限制未确认记录直接进入动画，同时保持确认后的数据不被重置。
          */
         setScene(scene, time = 0, play = true) {
-            if (!["home", "entry", "celebrate", "record", "focus", "history", "tasks", "profile"].includes(scene) || (["celebrate", "record"].includes(scene) && !this.record))
+            if (!["home", "entry", "celebrate", "record", "focus", "history", "tasks", "profile", "review"].includes(scene) || (["celebrate", "record"].includes(scene) && !this.record))
                 return false;
             this.bridge = this.scene === "entry" && scene === "record";
             this.bridgeAttention = this.attention;
@@ -419,6 +419,23 @@ __fluffyModules["animation.js"] = (() => {
                 });
                 ctx.restore();
             }
+            else if (this.scene === "review") {
+                // 同一只猫在卡片上方趴着：说话/倾听仅轻抬头与短前爪，身体接触点不平移。
+                const listen = this.reviewListen || 0, think = this.reviewThink || 0, talk = this.reviewTalk || 0;
+                const nod = (this.reviewNod || 0) * Math.sin(this.idle * 2.4);
+                const pulse = .5 + .5 * Math.sin(this.idle * 2.5), wave = (this.reviewWave || 0) * pulse;
+                const pet = Math.sin(Math.PI * M.clamp((this.idle - this.petAt) / 1.8));
+                ctx.save();
+                ctx.translate(17, 45); ctx.scale(.65, .63);
+                this.actor.record(ctx, {
+                    t: 0, idle: this.idle * .83, sleep: .82, headSleep: .71 - .36 * listen - .25 * talk - .13 * think + .024 * nod,
+                    tailSleep: .91, pen: null, grip: [140, 410], release: 1,
+                    lookOverride: .12 + .12 * listen, headTilt: -.025 * listen + .024 * think + .011 * talk * Math.sin(this.idle * 2.2) + .01 * nod,
+                    attention: listen, thought: think, pet, chatMotion: true,
+                    pawLift: wave * .85 + pet * .25, mouthTalk: talk * (.5 + .5 * Math.sin(this.idle * 4.4))
+                });
+                ctx.restore();
+            }
             else if (this.scene === "entry") {
                 const idlePose = {
                     t: 0, idle: this.idle, sleep: 0, headSleep: 0, tailSleep: 0,
@@ -497,6 +514,12 @@ __fluffyModules["animation.js"] = (() => {
                 this.focusRest = (this.focusRest || 0) + ((this.focusRestTarget || 0) - (this.focusRest || 0)) * blend;
                 this.attention += ((this.entryMode === "listening" ? 1 : 0) - this.attention) * blend;
                 this.thinking += ((this.entryMode === "thinking" ? 1 : 0) - this.thinking) * blend;
+                // 阶段二：回顾的状态变化使用同一低通缓动，不按录音/回复事件硬切姿态。
+                this.reviewListen = (this.reviewListen || 0) + ((this.reviewMode === "listen" ? 1 : 0) - (this.reviewListen || 0)) * blend;
+                this.reviewThink = (this.reviewThink || 0) + ((this.reviewMode === "think" || this.reviewMode === "talk" && this.reviewGesture === "think" ? 1 : 0) - (this.reviewThink || 0)) * blend;
+                this.reviewTalk = (this.reviewTalk || 0) + ((this.reviewMode === "talk" ? 1 : 0) - (this.reviewTalk || 0)) * blend;
+                this.reviewWave = (this.reviewWave || 0) + ((this.reviewMode === "talk" && this.reviewGesture === "wave" ? 1 : 0) - (this.reviewWave || 0)) * blend;
+                this.reviewNod = (this.reviewNod || 0) + ((this.reviewMode === "talk" && this.reviewGesture === "nod" ? 1 : 0) - (this.reviewNod || 0)) * blend;
                 this.render();
             }
             requestAnimationFrame(this.tick.bind(this));

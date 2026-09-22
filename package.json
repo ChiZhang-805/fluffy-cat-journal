@@ -1,13 +1,14 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "private": true,
-  "description": "Eight-place companion home, balanced cat bubbles, compact journals and themed sleep-time range",
+  "description": "Read-only daily recaps, animated weekly trends and contextual cat conversation",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs tests/journal-v6.test.cjs",
-    "test:browser": "python tests/journal_v6_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
+    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs tests/journal-v6.test.cjs tests/review.test.cjs",
+    "test:browser": "python tests/review_browser_test.py && python tests/review_extra_test.py && python tests/journal_v6_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
     "evaluate:emotion": "node tools/evaluate-emotion.cjs",
-    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v6.html"
+    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-Recap-v7.html",
+    "test:recap": "node --test tests/review.test.cjs"
   },
   "engines": {
     "node": ">=20"

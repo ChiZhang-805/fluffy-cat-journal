@@ -5,7 +5,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ['app.js','catalog.js','home-board.js','ai-journal.js','handwriting.js','bubble-copy.js','time-range-picker.js','form-layout.js']
+FILES = ['app.js','animation.js','cat-actor.js','review-data.js','review-conversation.js','review.js']
 DECL = re.compile(r'^([ \t]*)(?:(?:async|static|get|set)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)\s*\([^\n]*\)\s*\{', re.M)
 EXCLUDED = {'if','for','while','switch','catch','with'}
 
@@ -17,7 +17,7 @@ def audit():
     for name in FILES:
         text=(ROOT/'js'/name).read_text(encoding='utf-8')
         for m in DECL.finditer(text):
-            if m.group(2) in EXCLUDED:
+            if m.group(2) in EXCLUDED or '=>' in m.group(0):
                 continue
             before=text[:m.start()].rstrip()
             comment=''
@@ -32,8 +32,8 @@ def audit():
 
 if __name__=='__main__':
     items=audit()
-    payload={'scope':'Named declarations and class methods in eight changed modules; inline event callbacks excluded','count':len(items),'results':items}
-    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'tests/results/comment-v6-audit.json'
+    payload={'scope':'Named declarations and class methods in six changed modules; inline event callbacks excluded','count':len(items),'results':items}
+    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'tests/results/comment-v7-audit.json'
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
     failures=[item for item in items if not item['passed']]
