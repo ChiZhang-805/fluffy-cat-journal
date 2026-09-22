@@ -2,6 +2,7 @@ __fluffyModules["animation.js"] = (() => {
     const { displayRows, circularPositions } = __fluffyModules["model.js"];
     const { makeHandwriting, sampleHandwriting, drawHandwriting } = __fluffyModules["handwriting.js"];
     const M = window.M;
+    const ReviewGeometry = __fluffyModules["review-layout.js"].geometry;
     /**
      * 输入：id（DOM标识）。
      * 输出：对应页面元素或null。
@@ -426,7 +427,9 @@ __fluffyModules["animation.js"] = (() => {
                 const pulse = .5 + .5 * Math.sin(this.idle * 2.5), wave = (this.reviewWave || 0) * pulse;
                 const pet = Math.sin(Math.PI * M.clamp((this.idle - this.petAt) / 1.8));
                 ctx.save();
-                ctx.translate(17, 45); ctx.scale(.65, .63);
+                // 与回顾页卡片共用上移量，保留原有体型、姿态与动作连续性。
+                ctx.translate(ReviewGeometry.actorX, ReviewGeometry.actorY);
+                ctx.scale(ReviewGeometry.actorScaleX, ReviewGeometry.actorScaleY);
                 this.actor.record(ctx, {
                     t: 0, idle: this.idle * .83, sleep: .82, headSleep: .71 - .36 * listen - .25 * talk - .13 * think + .024 * nod,
                     tailSleep: .91, pen: null, grip: [140, 410], release: 1,

@@ -23,13 +23,13 @@ def run():
         b=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_BIN','/usr/bin/chromium'),headless=True,args=['--no-sandbox']);page=b.new_page(viewport={'width':1000,'height':1000});page.set_default_timeout(6000);errors=[];page.on('pageerror',lambda e:errors.append(str(e)));page.set_content(doc);page.wait_for_function('window.FluffyDebug?.animation.ready')
         check('单文件启动是现有猫咪首页',page.evaluate("FluffyDebug.animation.scene==='home'"))
         for id in ['sport','food','mood','sleep','face','focus']:
-            page.evaluate('(id)=>FluffyDebug.openEntry(id,{})',id);check(id+'单文件空表单使用长按提示',page.locator('#confirm-label').inner_text()=='长按向小猫倾诉');page.locator('#entry-more').click();check(id+'单文件有三项菜单',page.locator('#entry-menu button').count()==3);page.keyboard.press('Escape')
+            page.evaluate('(id)=>FluffyDebug.openEntry(id,{})',id);check(id+'单文件空表单使用长按提示',page.locator('#confirm-label').inner_text()=={'sport': '长按和小猫聊运动', 'food': '长按告诉小猫吃了啥', 'mood': '长按和小猫说心情', 'sleep': '长按和小猫聊睡眠', 'face': '长按说说今天的状态', 'focus': '长按告诉小猫你的计划'}[id]);page.locator('#entry-more').click();check(id+'单文件有三项菜单',page.locator('#entry-menu button').count()==3);page.keyboard.press('Escape')
         page.evaluate("FluffyDebug.openEntry('sport',{activity:'跑步',durationMinutes:12,notes:'沿河慢跑'})")
         check('单文件填写完整后恢复继续',page.locator('#confirm-label').inner_text()=='完成并继续');page.locator('#entry-more').click();page.locator('[data-action=date]').click();page.locator('[data-date]:not(:disabled)').nth(6).click();date=page.evaluate('FluffyDebug.entryMenu.candidate');page.locator('.date-save').click();page.locator('#confirm-entry').click()
         check('单文件补记后进入连续书写',page.evaluate("FluffyDebug.animation.scene==='record'"))
         page.evaluate('FluffyDebug.animation.time=FluffyDebug.animation.writeEnd+10;FluffyDebug.animation.render()');page.locator('#primary').click();page.evaluate('FluffyDebug.animation.time=6;FluffyDebug.animation.render()');page.locator('#primary').click()
         check('单文件完成后回顾日期等于选择日期',page.evaluate('FluffyDebug.review.view.date')==date)
-        check('单文件记录只保存一次',page.evaluate("__fluffyModules['journal-store.js'].records().length===1"))
+        check('单文件回顾应用新版高度与更高柱子',page.evaluate('document.querySelector("#review-week").offsetHeight===266&&document.querySelector("#review-week").offsetTop===444&&document.querySelector(".review-bar-slot").offsetHeight===135'));check('单文件记录只保存一次',page.evaluate("__fluffyModules['journal-store.js'].records().length===1"))
         page.evaluate('FluffyDebug.review.textSheet()');page.locator('#sheet').evaluate('(e)=>Promise.all(e.getAnimations().map(a=>a.finished))');check('单文件聊天标题和发送按钮均有图标',page.locator('#sheet-title .icon').count()==1 and page.locator('.review-text-submit .icon').count()==1);check('单文件聊天保留独立间距',page.evaluate('parseFloat(getComputedStyle(document.querySelector(".review-text-compose")).gap)===14'));check('单文件无脚本错误',not errors);page.close();b.close()
 
 if __name__=='__main__':

@@ -6,6 +6,7 @@ from browser_helpers_v5 import test_document
 ROOT=Path(__file__).resolve().parents[1]
 OUT=Path(os.environ.get('FLUFFY_RESULTS',ROOT/'tests/results/v9'));OUT.mkdir(parents=True,exist_ok=True)
 RESULTS=[]
+EXPECTED_ZH={'sport': '长按和小猫聊运动', 'food': '长按告诉小猫吃了啥', 'mood': '长按和小猫说心情', 'sleep': '长按和小猫聊睡眠', 'face': '长按说说今天的状态', 'focus': '长按告诉小猫你的计划'}
 FULL={
  'sport':{'activity':'跑步','durationMinutes':'25','notes':'今天在公园慢跑了一会儿。'},
  'food':{'meal':'午餐','foods':'米饭、鸡肉和西兰花','portion':'一碗','calories':'560','protein':'28','carbs':'65','fat':'19','notes':'吃得很舒服。'},
@@ -42,7 +43,7 @@ def run():
         # 阶段一：六类都只根据记录字段完成度切换，照片不参与。
         for category,data in FULL.items():
             p.evaluate('(id)=>FluffyDebug.openEntry(id,{})',category)
-            check(category+'空白表单显示长按邀请',p.locator('#confirm-label').inner_text()=='长按向小猫倾诉' and p.locator('#confirm-entry').get_attribute('data-action')=='invite')
+            check(category+'空白表单显示长按邀请',p.locator('#confirm-label').inner_text()==EXPECTED_ZH[category] and p.locator('#confirm-entry').get_attribute('data-action')=='invite')
             check(category+'空表单可长按且无前进箭头',not p.locator('#confirm-entry').is_disabled() and not p.locator('#confirm-entry .chevron').is_visible())
             p.evaluate('(fields)=>FluffyDebug.fillForm(fields)',data)
             expected='开始专注' if category=='focus' else '完成并继续'
@@ -50,7 +51,7 @@ def run():
             if category in ['food','face']:
                 check(category+'没有上传照片也能完整',p.locator('#photo-preview img').count()==0 and p.evaluate('FluffyDebug.state.entryComplete'))
             p.locator('#field-notes').fill('')
-            check(category+'删除最后一空立即回到倾诉',p.locator('#confirm-entry').get_attribute('data-action')=='invite')
+            check(category+'删除最后一空立即回到分类邀请',p.locator('#confirm-entry').get_attribute('data-action')=='invite')
             p.locator('#field-notes').fill(data['notes'])
             check(category+'重新填写又恢复且不误提交',p.locator('#confirm-label').inner_text()==expected and p.evaluate('FluffyDebug.animation.scene')=='entry')
         p.evaluate('FluffyDebug.openEntry("food",{})');p.wait_for_timeout(300);shot(p,'food-empty')
@@ -66,7 +67,7 @@ def run():
         check('只触发change的自动填充也更新',p.locator('#confirm-label').inner_text()=='完成并继续')
         p.evaluate('FluffyDebug.changeLanguage("en")')
         check('完整按钮跟随英文语言',p.locator('#confirm-label').inner_text()=='Finish & continue')
-        p.locator('#field-notes').fill('');check('英文不完整提示',p.locator('#confirm-label').inner_text()=='Hold to tell your cat')
+        p.locator('#field-notes').fill('');check('英文不完整提示',p.locator('#confirm-label').inner_text()=='Hold to log your workout')
         p.evaluate('FluffyDebug.changeLanguage("zh");FluffyDebug.changeRecordDate("2026-01-01")')
         check('补记日期切换不造成空表单误完成',p.locator('#confirm-entry').get_attribute('data-action')=='invite')
         p.evaluate('FluffyDebug.openEntry("food",{meal:"午餐",foods:"自己准备的午餐"})');p.locator('#confirm-entry').click()
@@ -90,7 +91,7 @@ def run():
         p.evaluate('(d)=>finishEntryAI({fields:d,warnings:[],estimated:false})',FULL['sport']);p.wait_for_function('FluffyDebug.state.phase==="idle"')
         check('AI完整回填后恢复继续且没有自动写入',p.locator('#confirm-label').inner_text()=='完成并继续' and p.evaluate('FluffyDebug.animation.scene')=='entry')
         p.locator('#field-notes').fill('');press(p,'#confirm-entry');p.keyboard.press('Escape');p.mouse.up()
-        check('取消录音后回到正确完成度且不提交',p.locator('#confirm-label').inner_text()=='长按向小猫倾诉' and p.evaluate('voiceCalls.extract===1'))
+        check('取消录音后回到正确完成度且不提交',p.locator('#confirm-label').inner_text()==EXPECTED_ZH['sport'] and p.evaluate('voiceCalls.extract===1'))
         p.evaluate('''() => {const R=FluffyDebug.review;FluffyDebug.apiTest.clear();FluffyDebug.openReview('sport');R.h.microphone.status=async()=> 'granted';R.h.bailian.setKey('test-only-bailian');R.raw.supported=()=>true;R.raw.start=async()=>{R.raw.active=true;R.started();R.wave=Array.from({length:72},(_,i)=>(i%10)/14);return true};R.raw.cancel=()=>{R.raw.active=false};}''')
         press(p,'#review-chat')
         check('回顾页仍在底部聊天按钮中显示波形',p.locator('#review-chat-wave').is_visible() and p.locator('#voice-panel').is_hidden() and p.evaluate('getComputedStyle(document.querySelector("#review-chat-label")).visibility')=='hidden')

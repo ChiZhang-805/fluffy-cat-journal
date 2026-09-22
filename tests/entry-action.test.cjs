@@ -8,6 +8,8 @@ function setup() {
     for (const name of ['model','sleep-time','catalog','entry-action']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',name+'.js'),'utf8'),ctx);
     return vm.runInContext('__fluffyModules["entry-action.js"]',ctx);
 }
+const EXPECTED_ZH = {"sport": "长按和小猫聊运动", "food": "长按告诉小猫吃了啥", "mood": "长按和小猫说心情", "sleep": "长按和小猫聊睡眠", "face": "长按说说今天的状态", "focus": "长按告诉小猫你的计划"};
+const EXPECTED_EN = {"sport": "Hold to log your workout", "food": "Hold to share your meal", "mood": "Hold to share how you feel", "sleep": "Hold to talk about sleep", "face": "Hold to share your skin notes", "focus": "Hold to tell me your plan"};
 const full = {
     sport: { activity:'力量训练', durationMinutes:'40.5', notes:'深蹲四组' },
     food: { meal:'午餐', foods:'米饭和鸡肉', portion:'一碗', calories:'600', protein:'30', carbs:'70', fat:'20', notes:'吃得很舒服' },
@@ -17,7 +19,7 @@ const full = {
     focus: { task:'读论文', durationMinutes:'25', notes:'方法部分' }
 };
 for (const [category,raw] of Object.entries(full)) {
-    test(category+'空表单是长按邀请且不禁用按钮',()=>{const m=setup(),s=m.inspect(category,{});assert.equal(s.complete,false);const d=m.describe({category,complete:s.complete});assert.equal(d.mode,'invite');assert.equal(d.label,'长按向小猫倾诉');assert.equal(d.disabled,false);});
+    test(category+'空表单是长按邀请且不禁用按钮',()=>{const m=setup(),s=m.inspect(category,{});assert.equal(s.complete,false);const d=m.describe({category,complete:s.complete});assert.equal(d.mode,'invite');assert.equal(d.label,EXPECTED_ZH[category]);assert.equal(d.disabled,false);});
     test(category+'填写所有记录项后切换',()=>{const m=setup(),s=m.inspect(category,raw,{recordDate:'2026-09-22'});assert.equal(s.complete,true);assert.equal(s.canSubmit,true);assert.equal(m.describe({category,complete:true}).label,category==='focus'?'开始专注':'完成并继续');});
     test(category+'任意一项删除回到邀请',()=>{const m=setup();for(const key of Object.keys(raw)){assert.equal(m.inspect(category,{...raw,[key]:' \n '},{recordDate:'2026-09-22'}).complete,false,key);}});
 }
@@ -30,7 +32,27 @@ test('完整度不是新增必填规则：未知营养可以按原提交规则�
 test('状态计算不修改用户输入对象',()=>{const raw={...full.sport};const before=JSON.stringify(raw);setup().inspect('sport',raw);assert.equal(JSON.stringify(raw),before);});
 test('超长备注有值但不算合格的完成状态',()=>{assert.equal(setup().inspect('sport',{...full.sport,notes:'字'.repeat(61)}).complete,false);});
 for(const phase of ['requesting','authorizing','listening','thinking'])test(phase+'优先于完成度且保留取消语义',()=>{const m=setup();for(const complete of [false,true]){const result=m.describe({category:'sport',phase,complete});assert.equal(result.mode,'busy');assert.equal(result.disabled,phase==='authorizing');if(phase==='listening')assert.equal(result.label,'松开结束');if(phase==='thinking')assert.equal(result.label,'停止整理');}});
-test('英文邀请和英文继续都有正确的无障碍描述',()=>{const m=setup();assert.equal(m.describe({category:'food',language:'en'}).label,'Hold to tell your cat');const result=m.describe({category:'sport',language:'en',complete:true});assert.equal(result.label,'Finish & continue');assert.ok(result.help.includes('Escape'));assert.ok(result.accessibleLabel.includes('hold to speak'));});
+test('英文邀请和英文继续都有正确的无障碍描述',()=>{const m=setup();assert.equal(m.describe({category:'food',language:'en'}).label,EXPECTED_EN.food);const result=m.describe({category:'sport',language:'en',complete:true});assert.equal(result.label,'Finish & continue');assert.ok(result.help.includes('Escape'));assert.ok(result.accessibleLabel.includes('hold to speak'));});
 test('未就绪不开放交互，填满也不绕过素材准备',()=>{assert.equal(setup().describe({category:'sport',complete:true,loaded:false}).disabled,true);});
 test('专注继续区分新计时、过去补记与修改',()=>{const m=setup();assert.equal(m.describe({category:'focus',complete:true,past:true}).label,'补记专注');assert.equal(m.describe({category:'focus',complete:true,past:true,editing:true}).label,'保存修改');assert.equal(m.describe({category:'focus',complete:true,editing:true,language:'en'}).label,'Save changes');});
 test('不完整的专注编辑也先显示语音邀请',()=>{assert.equal(setup().describe({category:'focus',editing:true,past:true,complete:false}).mode,'invite');});
+
+for (const category of Object.keys(EXPECTED_ZH)) {
+    test(category+'中文邀请与无障碍名称同时按类别变化', () => {
+        const m=setup(), d=m.describe({category});
+        assert.equal(m.invitationFor(category),EXPECTED_ZH[category]);
+        assert.ok(d.accessibleLabel.startsWith(EXPECTED_ZH[category]));
+        assert.ok(d.help.includes('短按')); assert.equal(d.mode,'invite');
+    });
+    test(category+'英文邀请保留类别含义', () => {
+        assert.equal(setup().describe({category,language:'en'}).label,EXPECTED_EN[category]);
+    });
+}
+test('未知类别使用安全通用邀请',()=>{const m=setup(); for(const key of [undefined,'other','toString','__proto__']) {
+    assert.equal(m.invitationFor(key),'长按和小猫说一说');
+    assert.equal(m.invitationFor(key,'en'),'Hold to tell your cat');
+}});
+test('六类中文提示不同且均能按短句排版',()=>{
+    assert.equal(new Set(Object.values(EXPECTED_ZH)).size,6);
+    for(const s of Object.values(EXPECTED_ZH))assert.ok(s.length<=11&&!s.includes('\n'));
+});

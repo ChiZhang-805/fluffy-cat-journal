@@ -1,15 +1,16 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "9.0.0",
+  "version": "10.0.0",
   "private": true,
-  "description": "Context-aware entry buttons and a refined recap text conversation sheet",
+  "description": "Roomier seven-day recaps and category-specific voice invitations",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs tests/journal-v6.test.cjs tests/review.test.cjs tests/journal-v8.test.cjs tests/entry-action.test.cjs",
-    "test:browser": "python tests/interaction_v9_browser_test.py && python tests/journal_v8_browser_test.py && python tests/journal_v8_extra_test.py && python tests/review_browser_test.py && python tests/review_extra_test.py && python tests/journal_v6_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
+    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs tests/journal-v6.test.cjs tests/review.test.cjs tests/journal-v8.test.cjs tests/entry-action.test.cjs tests/review-layout.test.cjs",
+    "test:browser": "python tests/refinement_v10_browser_test.py && python tests/interaction_v9_browser_test.py && python tests/journal_v8_browser_test.py && python tests/journal_v8_extra_test.py && python tests/review_browser_test.py && python tests/review_extra_test.py && python tests/journal_v6_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
     "evaluate:emotion": "node tools/evaluate-emotion.cjs",
-    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v9.html",
+    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v10.html",
     "test:recap": "node --test tests/review.test.cjs",
-    "test:v9": "node --test tests/entry-action.test.cjs && python tests/interaction_v9_browser_test.py"
+    "test:v9": "node --test tests/entry-action.test.cjs && python tests/interaction_v9_browser_test.py",
+    "test:v10": "node --test tests/entry-action.test.cjs tests/review-layout.test.cjs && python tests/refinement_v10_browser_test.py"
   },
   "engines": {
     "node": ">=20"

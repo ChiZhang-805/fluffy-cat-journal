@@ -13,7 +13,7 @@ __fluffyModules["entry-i18n.js"] = (() => {
         "哪一餐": "Which meal?", "吃了什么": "What did you eat?", "大概份量": "Portion", "热量": "Energy", "蛋白质": "Protein", "碳水化合物": "Carbohydrates", "脂肪": "Fat", "营养信息 · 估算": "Nutrition · estimated",
         "早餐": "Breakfast", "午餐": "Lunch", "晚餐": "Dinner", "加餐": "Snack", "自己的感受": "How do you feel?", "眼周观察": "Eye area", "皮肤外观": "Skin appearance",
         "拍照": "Camera", "选择照片": "Choose photo", "等待照片": "Your photo goes here", "照片预览框": "Photo preview", "删除照片": "Remove photo", "移除照片": "Remove photo", "让小猫看看": "Let me take a look", "重拍": "Retake", "使用照片": "Use photo",
-        "完成并继续": "Finish & continue", "长按向小猫倾诉": "Hold to tell your cat", "确认并继续": "Confirm & continue", "开始专注": "Start focusing", "补记专注": "Log past focus", "修改专注": "Edit focus session", "保存补记": "Save this session", "保存修改": "Save changes", "完成": "Done", "继续": "Continue", "修改记录": "Edit entry",
+        "完成并继续": "Finish & continue", "长按和小猫说一说": "Hold to tell your cat", "确认并继续": "Confirm & continue", "开始专注": "Start focusing", "补记专注": "Log past focus", "修改专注": "Edit focus session", "保存补记": "Save this session", "保存修改": "Save changes", "完成": "Done", "继续": "Continue", "修改记录": "Edit entry",
         "等待麦克风…": "Allow microphone…", "等待麦克风": "Allow microphone", "松开结束": "Release to finish", "停止整理": "Stop", "小猫正在整理": "Thinking it through", "正在听你说": "I'm listening", "整理好后，你可以修改每个字段": "You can edit the draft", "松开，交给我整理": "Release when you're done", "慢慢说，我在听。": "Take your time. I'm listening.",
         "整理好了，请核对。": "Your draft is ready to review.", "先写下想做的事情。": "Tell me what you'd like to do first.", "已保留你刚才手动修改的内容。": "Your recent edits have been kept.",
         "例如：跑步": "For example: running", "例如：跑了 5 公里，或练了 4 组深蹲": "For example: 5 km or four sets of squats",

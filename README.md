@@ -1,17 +1,22 @@
-# Fluffy Cat · v9
+# Fluffy Cat · v10
 
-沿用现有手机APP代码原型。本次只调整记录页的底部按钮，以及数据回顾页的「文字聊聊」弹层。
+基于已部署的v9，仅调整数据回顾的空间利用和六类记录的长按提示。
+所有猫咪素材、表单、记录校验、计时、补记、聊天和API设置继续沿用。
 
 ## 本版行为
 
-记录未填满：居中的麦克风 + **长按向小猫倾诉**。
-记录填满并有效：普通记录为 **完成并继续**；专注仍为 **开始专注**，编辑/补记保留各自动作。
-清空内容会立即回到倾诉提示，照片不计入填空。可选营养等原有提交规则不变，不要求编造未知信息。
+回顾页：小猫、气泡和当天数据卡一起上移44设计像素；近7天卡片从222增至266像素，
+100分的最大柱高从79增至135像素。导航、聊天按钮和数据计算不变；情绪保留无高低排序的文字足迹。
 
-记录页长按时仍在上方记录模块显示音量/转写；数据回顾页才在底部绿色聊天按钮里显示波形。
+未填完整的记录按钮按板块显示：
 
-回顾「文字聊聊」标题增加图标，输入与发送按钮间距为14设计像素；发送图标与较大文字一起居中。
-支持多行、输入法、Ctrl/Cmd+Enter、空白检查和单次提交；仍然只读既有记录。
+- 运动：长按和小猫聊运动；饮食：长按告诉小猫吃了啥。
+- 情绪：长按和小猫说心情；睡眠：长按和小猫聊睡眠。
+- 面部：长按说说今天的状态；专注：长按告诉小猫你的计划。
+
+中文/英文都提供对应短句；填完整后仍恢复“完成并继续”或专注对应动作。
+照片不计入填空，可选营养不会变成必填。
+记录页长按的波形仍在上方记录模块；回顾页才在底部绿色按钮里显示。
 
 ## 运行
 
@@ -21,15 +26,32 @@
 python -m http.server 8000
 ```
 
-浏览器打开本机服务器。发布版在既有 GitHub Pages 使用。
-单文件预览可由下面命令生成；它内嵌页面资源，但不内嵌API密钥或个人记录：
+生成单文件手动预览：
 
 ```sh
-python tools/build-standalone.py ../Fluffy-Cat-v9.html
+python tools/build-standalone.py ../Fluffy-Cat-v10.html
 ```
 
-语音与模型功能沿用项目现有配置。Key只存页面内存，不要硬编码到本仓库。
-用户运动/饮食等记录仍由当前浏览器本机存储管理，单文件与网站属于不同存储环境，不会自动同步。
+图片、CSS和JS均内嵌。语音/模型能力仍需网络、权限和实际Key，Key只保存在页面内存，
+不要写入源码或提交仓库。原记录保存在使用者的浏览器中；本地HTML和线上站点不自动同步记录。
+
+## 更新现有网站
+
+完整解压外层更新包，运行 **Update-GitHub-Pages.cmd**，核对仓库名后确认。
+更新器基于旧文件SHA检查冲突，保留无关文件，用一次提交更新，再检查原网址上的资源。
+不新建仓库、不删除文件、不强推，也不改Pages配置。
+不要运行 `site/Publish-GitHub-Pages.cmd`，那是保留的初次创建工具。
+本轮GitHub连接写入返回403，下载源码不等于线上网站已经更新。
+
+## 主要实现
+
+- `js/review-layout.js`：Canvas与DOM共用回顾坐标，柱高纯函数。
+- `css/review.css`：更高的绘图区、独立刻度/日期空间。
+- `js/animation.js`：仅review场景更换平移坐标，不改角色、缩放或动作。
+- `js/review.js`：使用共享布局及同比柱高。
+- `js/entry-action.js`：分类长按提示，不改变完成度或录音状态。
+
+命名函数头保持“输入、输出、功能”，长函数按阶段注明作用。没有附带字体文件。
 
 ## 验证
 
@@ -37,31 +59,16 @@ python tools/build-standalone.py ../Fluffy-Cat-v9.html
 npm test
 python -m pip install -r tests/requirements.txt
 python -m playwright install chromium
+python tests/refinement_v10_browser_test.py
 python tests/interaction_v9_browser_test.py
-python tests/journal_v8_extra_test.py
-python tests/standalone_v9_smoke.py ../Fluffy-Cat-v9.html
+python tests/review_browser_test.py
+python tests/review_extra_test.py
+python tests/standalone_v9_smoke.py ../Fluffy-Cat-v10.html
 ```
 
-浏览器脚本可用 `CHROMIUM_BIN` 指定可执行文件，`FLUFFY_RESULTS` 指定证据目录。
-测试只注入明确的测试替身，不使用付费服务和真实用户记录。
+脚本支持 `CHROMIUM_BIN`（浏览器路径）、`FLUFFY_RESULTS`（证据输出目录）。
+242项单元测试和306项浏览器/交付文件检查通过；65处命名函数/方法注释检查通过。
 
-已完成216个单元测试、113项针对性浏览器/产物检查；更多边界与未验证项见
-[`docs/v9-entry-action-and-text-chat.md`](docs/v9-entry-action-and-text-chat.md)。
-
-## 更新现有网站
-
-完整解压外层更新包，运行 **Update-GitHub-Pages.cmd**，核对仓库名后确认。
-外层脚本会核验旧文件 SHA、保护并发改动、一次性提交本轮文件，并检查原网址的新版资源。
-不新建仓库、不删除无关文件、不强推、不修改Pages配置。
-
-不要运行本目录中的旧 **Publish-GitHub-Pages.cmd**；那是保留的初次创建工具。
-
-## 主要实现
-
-- `js/entry-action.js`：完成度检查和按钮状态映射，纯逻辑可测试。
-- `js/app.js`：输入/回填/日期/语言刷新，以及受控的底部面板标题图标。
-- `js/review.js`：原回顾聊天链路上的文字输入表单。
-- `css/interaction-v9.css`：只作用于本轮改动的布局样式。
-- `js/catalog.js`、`js/animation.js` 等原字段/动画模块未改变。
-
-命名函数头保持「输入、输出、功能」，长函数内按阶段注释。没有附带字体文件。
+本环境的localhost浏览器导航被策略阻止，回归使用内存文档中的真实源码和隔离存储。
+语音/API场景使用明确替身；真实麦克风、Key、摄像头、iPhone/Safari及Windows更新器没有端到端实测。
+完整坐标、测试范围与限制见 [本版说明](docs/v10-recap-spacing-and-prompts.md)。

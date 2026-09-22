@@ -1,6 +1,7 @@
 /* 只读数据回顾与陪伴对话。可交互UI、音频生命周期、图表动画和猫咪连续状态均在本模块隔离。 */
 __fluffyModules["review.js"] = (() => {
     "use strict";
+    const Layout = __fluffyModules["review-layout.js"];
     const Data = __fluffyModules["review-data.js"], Talk = __fluffyModules["review-conversation.js"], Store = __fluffyModules["journal-store.js"];
     const { HoldGesture } = __fluffyModules["gesture.js"], { AudioSession } = __fluffyModules["audio-session.js"], { SpeechSession } = __fluffyModules["speech.js"];
     /** 输入：元素ID。输出：DOM节点或null。功能：限定页面节点查找入口。 */
@@ -24,6 +25,7 @@ __fluffyModules["review.js"] = (() => {
             this.sessions = new Map(); this.openings = new Set(); this.queue = []; this.wave = Array(72).fill(0); this.level = 0; this.lastTick = 0;
             this.measureCanvas = document.createElement("canvas"); this.measure = this.measureCanvas.getContext("2d");
             this.root = node("section", "review-page"); this.root.id = "review-page"; this.root.hidden = true; this.root.setAttribute("aria-label", "数据回顾");
+            Layout.applyLayout(this.root);
             this.root.innerHTML = `<header class="review-header"><button class="review-home" id="review-home" aria-label="返回首页">${icon("home")}</button><h2 id="review-title"></h2><p class="review-date" id="review-date"></p><button class="review-more" id="review-more" aria-label="回顾菜单" aria-expanded="false" aria-controls="review-menu" aria-haspopup="menu">${icon("more")}</button></header>
             <div class="review-menu" id="review-menu" role="menu" hidden></div>
             <button class="review-pet" id="review-pet" aria-label="摸摸小猫"></button>
@@ -231,11 +233,17 @@ __fluffyModules["review.js"] = (() => {
         factLabel() { return this.t(({ sport: this.view.date === Store.dayKey() ? "今日运动" : "当日运动", sleep: "睡眠时长", focus: "实际专注", food: "已记录热量", face: "留下的观察" })[this.view.id] || "今天", ({ sport: "Movement", sleep: "Sleep duration", focus: "Actual focus", food: "Logged energy", face: "Observations" })[this.view.id] || "Today"); }
         /** 输入：日汇总。输出：短数值与单位。功能：未知值留横线、部分饮食热量不称全天总摄入。 */
         valueText(d) { const value = Data.format(d.value); return `${value}${d.value == null ? "" : " " + (d.unit === "entries" ? this.t("次", "entries") : d.unit === "h" ? this.t("小时", "h") : d.unit === "min" ? this.t("分钟", "min") : d.unit)}`; }
-        /** 输入：无。输出：无。功能：7天逐柱升起；情绪用无高低排序的文字足迹。 */
+        /**
+         * 输入：无，读取当前回顾的七日快照与共用布局参数。
+         * 输出：无，重建可点击的七天图表。
+         * 功能：把0—100分映射到增高后的真实绘图区，仍逐柱升起；情绪只展示文字足迹。
+         */
         renderWeek() {
+            // 阶段一：标题、绘图区和底部摘要各留固定空间，不挤压日期或分数标签。
             const root = $("review-week"); root.replaceChildren(); const mood = this.view.id === "mood";
             const header = node("div", "review-week-heading"); header.append(node("h3", "", mood ? this.t("这一周的心情", "This week's feelings") : this.t("近 7 天", "Last 7 days")), node("span", "review-week-unit", mood ? "" : this.t("分 · 0—100", "Score · 0–100"))); root.append(header);
             const chart = node("div", mood ? "review-mood-week" : "review-bars");
+            // 阶段二：逐日保留真实分数与空白状态，柱高只依赖共用的绘图高度。
             this.view.week.forEach((day, i) => {
                 const button = node("button", mood ? "review-mood-day" + (!day.count ? " empty" : "") : "review-bar" + (i === 6 ? " today" : "") + (day.score == null ? " missing" : ""));
                 button.type = "button"; button.style.setProperty("--i", i); button.dataset.day = day.date; button.setAttribute("aria-pressed", String(i === 6));
@@ -244,13 +252,14 @@ __fluffyModules["review.js"] = (() => {
                     const orb = node("span", "review-mood-orb"); orb.innerHTML = icon(day.count ? "heart" : "ring");
                     button.append(orb, node("span", "", day.date.slice(8)), node("span", "review-mood-word", day.text || "—")); chart.append(button);
                 } else {
-                    const height = day.score == null ? 0 : Math.max(3, day.score * .79); button.style.setProperty("--bar-height", `${height}px`);
+                    const height = Layout.barHeight(day.score); button.style.setProperty("--bar-height", `${height}px`);
                     if (day.score != null) { const paint = node("span", "review-bar-paint"); paint.style.height = height + "px"; button.append(paint); }
                     button.append(node("span", "review-bar-number", day.score == null ? "—" : String(day.score)), node("span", "review-bar-day", day.date.slice(8)));
                     const slot = node("div", "review-bar-slot"); slot.append(button); chart.append(slot);
                 }
                 button.onclick = () => { chart.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === button))); $("review-week-detail").textContent = this.dayDetail(day); };
             });
+            // 阶段三：点击只更换当天摘要，不改数据，也不重启麦克风或AI请求。
             const detail = node("p", "review-week-detail", this.dayDetail(this.view.today)); detail.id = "review-week-detail"; detail.setAttribute("aria-live", "polite"); root.append(chart, detail);
         }
         /** 输入：一天。输出：图表点击后的实际文字。功能：点击只是查看，不篡改得分或触发AI。 */
