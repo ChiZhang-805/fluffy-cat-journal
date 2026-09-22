@@ -196,8 +196,8 @@ function glyphWidth(char, size) {
 function makeHandwriting(text, maxWidth = 250, maxHeight = 54) {
     const chars = graphemes(text);
     let size = 25, placements;
-    // 阶段一：寻找能完整容纳文本的排版，不通过裁切隐藏用户信息。
-    while (size >= 12) {
+    // 阶段一：寻找能完整容纳文本的排版；长备注允许降到10px，避免第四行越过书写区，不裁切信息。
+    while (size >= 10) {
         placements = [];
         let x = 0, row = 0;
         for (const char of chars) {
@@ -209,7 +209,7 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 54) {
             placements.push({ char, x, y: row * size * 1.45, row, width });
             x += width;
         }
-        if ((row + 1) * size * 1.45 <= maxHeight || size === 12)
+        if ((row + 1) * size * 1.45 <= maxHeight || size === 10)
             break;
         size--;
     }

@@ -1,14 +1,14 @@
-/* 六个真实组件，九个可放置位置。手势只改变布局，不触发菜单或重复点击。 */
+/* 六个真实组件，八个可放置位置；九宫格右下角永远留给原样气泡。手势只改变布局，不触发菜单或重复点击。 */
 __fluffyModules["home-board.js"] = (() => {
     "use strict";
     const { CATEGORIES, DEFAULT_ORDER, summary } = __fluffyModules["catalog.js"];
     const Store = __fluffyModules["journal-store.js"];
-    const KEY = "fluffy-home-slots-v2";
+    const KEY = "fluffy-home-slots-v3", LEGACY_KEY = "fluffy-home-slots-v2", RESERVED_SLOT = 8;
     const SLOTS = Array.from({ length: 9 }, (_, i) => [18 + i % 3 * 121, 151 + Math.floor(i / 3) * 124]);
     const DEFAULT_SLOTS = ["mood", "food", null, null, "focus", "sport", "sleep", "face", null];
     /**
      * 输入：原始布局（旧6项或新9项）。
-     * 输出：九位置、六唯一类别的布局。
+     * 输出：九格容器、八个可放位置、六个唯一类别的布局。
      * 功能：迁移旧顺序，修复重复/坏值，保留合法空位。
      */
     function normalizeSlots(raw) {
@@ -21,15 +21,19 @@ __fluffyModules["home-board.js"] = (() => {
         }
         const seen = new Set();
         const slots = Array.from({ length: 9 }, (_, i) => {
+            if (i === RESERVED_SLOT) return null;
             const id = raw[i];
             if (!Object.hasOwn(CATEGORIES, id) || seen.has(id))
                 return null;
             seen.add(id);
             return id;
         });
-        for (const id of DEFAULT_ORDER)
-            if (!seen.has(id))
-                slots[slots.indexOf(null)] = id;
+        // 先迁移旧版右下角组件到第一个合法空位，其余位置不变。
+        for (const id of [raw[RESERVED_SLOT], ...DEFAULT_ORDER]) {
+            if (!Object.hasOwn(CATEGORIES, id) || seen.has(id)) continue;
+            const free = slots.findIndex((item, i) => i !== RESERVED_SLOT && item === null);
+            if (free >= 0) { slots[free] = id; seen.add(id); }
+        }
         return slots;
     }
     /**
@@ -39,7 +43,7 @@ __fluffyModules["home-board.js"] = (() => {
      */
     function exchange(slots, from, to) {
         const next = [...slots];
-        if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from > 8 || to < 0 || to > 8 || !next[from])
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from > 8 || to < 0 || to >= RESERVED_SLOT || from === RESERVED_SLOT || !next[from])
             return next;
         [next[from], next[to]] = [next[to], next[from]];
         return next;
@@ -52,8 +56,11 @@ __fluffyModules["home-board.js"] = (() => {
     function slotAt(x, y) {
         if (x < 12 || x > 378 || y < 145 || y > 518)
             return -1;
+        // 禁放区含边缘缓冲，不能被最近邻吸附误判为相邻组件。
+        if (x >= 255 && y >= 390) return -1;
         let best = -1, distance = Infinity;
         for (let i = 0; i < SLOTS.length; i++) {
+            if (i === RESERVED_SLOT) continue;
             const [sx, sy] = SLOTS[i], d = Math.hypot(sx + 56 - x, sy + 55 - y);
             if (Math.abs(sx + 56 - x) <= 63 && Math.abs(sy + 55 - y) <= 64 && d < distance) {
                 best = i;
@@ -73,11 +80,13 @@ __fluffyModules["home-board.js"] = (() => {
             this.actions = actions;
             this.press = null;
             this.cards = new Map();
-            this.order = normalizeSlots(Store.read(KEY, Store.read("fluffy-home-order-v1", DEFAULT_SLOTS)));
+            this.order = normalizeSlots(Store.read(KEY, Store.read(LEGACY_KEY, Store.read("fluffy-home-order-v1", DEFAULT_SLOTS))));
+            Store.write(KEY, this.order);
             this.guides = SLOTS.map((slot, i) => {
                 const n = document.createElement("div");
                 n.className = "home-slot-guide";
                 n.dataset.slot = i;
+                if (i === RESERVED_SLOT) n.hidden = true;
                 n.setAttribute("aria-hidden", "true");
                 n.style.left = slot[0] + "px";
                 n.style.top = slot[1] + "px";
@@ -223,6 +232,11 @@ __fluffyModules["home-board.js"] = (() => {
          * 功能：交换或移到空位并持久化；保存失败明确告知。
          */
         place(id, index) {
+            if (index < 0 || index >= RESERVED_SLOT) {
+                this.announce("这里留给小猫说话，换个位置吧。");
+                this.layout();
+                return;
+            }
             this.order = exchange(this.order, this.order.indexOf(id), index);
             this.layout();
             const saved = Store.write(KEY, this.order);
@@ -240,7 +254,7 @@ __fluffyModules["home-board.js"] = (() => {
         /**
          * 输入：可选 skip。
          * 输出：无。
-         * 功能：六个组件平滑吸附九个位置，空位平时不可见。
+         * 功能：六个组件平滑吸附八个位置，空位平时不可见。
          */
         layout(skip = null) {
             this.order.forEach((id, i) => {
@@ -260,7 +274,7 @@ __fluffyModules["home-board.js"] = (() => {
          * 输出：无。
          * 功能：兼容既有布局操作入口，不丢失空位。
          */
-        reorder(id, step) { const i = this.order.indexOf(id), j = Math.max(0, Math.min(8, i + step)); this.place(id, j); }
+        reorder(id, step) { const i = this.order.indexOf(id), j = Math.max(0, Math.min(7, i + step)); this.place(id, j); }
         /**
          * 输入：无。
          * 输出：无。
@@ -279,5 +293,5 @@ __fluffyModules["home-board.js"] = (() => {
             b.classList.toggle("has-record", Boolean(r));
         } }
     }
-    return { HomeBoard, SLOTS, DEFAULT_SLOTS, normalizeSlots, exchange, slotAt, KEY };
+    return { HomeBoard, SLOTS, DEFAULT_SLOTS, normalizeSlots, exchange, slotAt, KEY, LEGACY_KEY, RESERVED_SLOT };
 })();

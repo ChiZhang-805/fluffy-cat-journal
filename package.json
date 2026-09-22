@@ -1,12 +1,13 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
-  "description": "Nine-slot companion homepage, single-column photo journals, local sleep times and editable Bailian audio understanding",
+  "description": "Eight-place companion home, balanced cat bubbles, compact journals and themed sleep-time range",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs",
-    "test:browser": "python tests/journal_v5_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
-    "evaluate:emotion": "node tools/evaluate-emotion.cjs"
+    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs tests/journal-v5.test.cjs tests/journal-v6.test.cjs",
+    "test:browser": "python tests/journal_v6_browser_test.py && python tests/media_v5_browser_test.py && python tests/refinement_test.py",
+    "evaluate:emotion": "node tools/evaluate-emotion.cjs",
+    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v6.html"
   },
   "engines": {
     "node": ">=20"

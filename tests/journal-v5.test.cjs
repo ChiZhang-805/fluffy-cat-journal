@@ -52,7 +52,7 @@ test('重复/原型字段布局不能构造第七卡片',()=>{const s=Board.norm
 test('移动到空位只改变源与目标',()=>{const s=Board.exchange(Board.DEFAULT_SLOTS,0,2);assert.equal(s[0],null);assert.equal(s[2],'mood');assert.equal(s[1],'food');assert.equal(Board.DEFAULT_SLOTS[0],'mood');});
 test('占位交换不会挤动第三者',()=>{const s=Board.exchange(Board.DEFAULT_SLOTS,0,5);assert.equal(s[0],'sport');assert.equal(s[5],'mood');assert.equal(s[4],'focus');});
 test('网格外/坏索引不会提交',()=>{assert.equal(Board.slotAt(-1,200),-1);assert.equal(Board.slotAt(80,600),-1);assert.equal(Board.exchange(Board.DEFAULT_SLOTS,0,-1).join(),Board.DEFAULT_SLOTS.join());});
-test('九槽中心逐个命中',()=>{Board.SLOTS.forEach(([x,y],i)=>assert.equal(Board.slotAt(x+56,y+55),i));});
+test('八个槽中心命中，右下角始终禁放',()=>{Board.SLOTS.forEach(([x,y],i)=>assert.equal(Board.slotAt(x+56,y+55),i===8?-1:i));});
 
 test('饮食字段无维生素，情绪无强度或枚举',()=>{assert.equal(C.category('food').fields.some(f=>f.key==='vitamins'),false);assert.equal(C.category('mood').fields.some(f=>f.key==='intensity'),false);assert.equal(C.category('mood').fields.find(f=>f.key==='mood').options,undefined);});
 test('睡眠醒来感受任意文字，起止仅time',()=>{assert.equal(C.category('sleep').fields.find(f=>f.key==='bedtime').type,'time');assert.equal(C.validate('sleep',{bedtime:'23:00',wakeTime:'07:00',quality:'仍有点困，但比昨天好'},true,anchor).ok,true);});

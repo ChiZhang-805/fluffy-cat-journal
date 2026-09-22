@@ -5,7 +5,7 @@ __fluffyModules["catalog.js"] = (() => {
     const Sleep = __fluffyModules["sleep-time.js"];
     const CATEGORIES = Object.freeze({
         mood: {
-            name: "情绪", en: "Mood", title: "今天的心情，讲给我听。", greeting: "什么心情，都可以放在这里。", icon: "mood", tone: "blue", fields: [
+            name: "情绪", en: "Mood", title: "今天的心情，讲给我听。", greeting: "心情慢慢讲呀\n我会好好听的", icon: "mood", tone: "blue", fields: [
                 {
                     key: "mood", label: "现在的心情", placeholder: "例如：有点失落，但也松了一口气", max: 60, required: true
                 },
@@ -18,7 +18,7 @@ __fluffyModules["catalog.js"] = (() => {
             ]
         },
         food: {
-            name: "饮食", en: "Meal", title: "今天的美味，记下来吧。", greeting: "拍一张，或者讲给我听。", icon: "food", tone: "light", photo: true, fields: [
+            name: "饮食", en: "Meal", title: "今天的美味，记下来吧。", greeting: "拍下这份美味\n一起好好记下", icon: "food", tone: "light", photo: true, fields: [
                 {
                     key: "meal", label: "哪一餐", type: "choice", options: ["早餐", "午餐", "晚餐", "加餐"], required: true
                 },
@@ -46,7 +46,7 @@ __fluffyModules["catalog.js"] = (() => {
             ]
         },
         focus: {
-            name: "专注", en: "Focus", title: "这一小段时间，留给你。", greeting: "一次一件事，我在旁边陪你。", icon: "focus", tone: "light", fields: [
+            name: "专注", en: "Focus", title: "这一小段时间，留给你。", greeting: "现在就开始吧\n我在旁边陪你", icon: "focus", tone: "light", fields: [
                 {
                     key: "task", label: "想专注做什么", placeholder: "例如：读完论文的方法部分", max: 60, required: true
                 },
@@ -59,28 +59,25 @@ __fluffyModules["catalog.js"] = (() => {
             ]
         },
         sport: {
-            name: "运动", en: "Workout", title: "今天的运动，讲给我听。", greeting: "每一步，我都认真记下来。", icon: "sport", tone: "blue", fields: [
+            name: "运动", en: "Workout", title: "今天的运动，讲给我听。", greeting: "每一步的努力\n我都帮你记下", icon: "sport", tone: "blue", fields: [
                 {
                     key: "activity", label: "运动项目", placeholder: "例如：跑步", max: 40, required: true
-                },
-                {
-                    key: "distanceKm", label: "距离", type: "decimal", unit: "km", placeholder: "5.2", maxValue: 2000, required: true
                 },
                 {
                     key: "durationMinutes", label: "时长", type: "decimal", unit: "分钟", placeholder: "30", minValue: .01, maxValue: 1440, required: true
                 },
                 {
-                    key: "notes", type: "textarea", label: "一句话备注", placeholder: "今天感觉怎么样？", max: 32, required: true
+                    key: "notes", type: "textarea", label: "备注", placeholder: "例如：跑了 5 公里，或练了 4 组深蹲", max: 60, required: true
                 }
             ]
         },
         sleep: {
-            name: "睡眠", en: "Sleep", title: "昨晚，睡得还好吗？", greeting: "把昨晚放下，慢慢迎接今天。", icon: "sleep", tone: "light", fields: [
+            name: "睡眠", en: "Sleep", title: "昨晚，睡得还好吗？", greeting: "昨晚睡得怎样\n慢慢讲给我听", icon: "sleep", tone: "light", fields: [
                 {
-                    key: "bedtime", label: "什么时候入睡", type: "time", required: true
+                    key: "bedtime", label: "入睡时间", type: "time", required: true
                 },
                 {
-                    key: "wakeTime", label: "什么时候醒来", type: "time", required: true
+                    key: "wakeTime", label: "醒来时间", type: "time", required: true
                 },
                 {
                     key: "quality", label: "醒来的感受", placeholder: "例如：还有点困，但比昨天精神", max: 60, required: true
@@ -91,7 +88,7 @@ __fluffyModules["catalog.js"] = (() => {
             ]
         },
         face: {
-            name: "面部", en: "Check-in", title: "今天的状态，轻轻看看。", greeting: "记录变化，不给长相打分。", icon: "face", tone: "blue", photo: true, fields: [
+            name: "面部", en: "Check-in", title: "今天的状态，轻轻看看。", greeting: "把今天的模样\n轻轻留在这里", icon: "face", tone: "blue", photo: true, fields: [
                 {
                     key: "feeling", label: "自己的感受", placeholder: "例如：有点困，但精神还好", max: 40, required: true
                 },
@@ -119,11 +116,28 @@ __fluffyModules["catalog.js"] = (() => {
         return CATEGORIES[id];
     }
     /**
+     * 输入：raw（新表单或旧运动数据，不修改原对象）。
+     * 输出：距离已合并到备注的副本。
+     * 功能：取消独立距离字段但保留历史公里数；反复读取/编辑不会重复追加。
+     */
+    function sportData(raw = {}) {
+        const next = { ...raw }, km = decimalNumber(raw.distanceKm);
+        if (km === null || km < 0 || km > 2000) return next;
+        const notes = cleanText(raw.notes);
+        // 阶段一：识别备注中已写的等值公里或米，避免迁移时复制同一信息。
+        const distances = [...notes.matchAll(/(\d+(?:\.\d+)?)\s*(公里|千米|km|米|m)(?![a-z])/gi)];
+        const mentioned = distances.some(match => Math.abs(Number(match[1]) / (/^(米|m)$/i.test(match[2]) ? 1000 : 1) - km) < 1e-8);
+        // 阶段二：未写出的旧距离作为备注补充，不清空用户原来的感受或训练信息。
+        if (!mentioned) next.notes = `${notes}${notes ? "；" : ""}距离 ${km} 公里`;
+        return next;
+    }
+    /**
      * 输入：id、raw（用户输入）、strict（是否提交校验）。
      * 输出：{ok,value,errors}。
      * 功能：统一校验数字、长度、选项及跨日睡眠。
      */
     function validate(id, raw, strict = true, context = {}) {
+        if (id === "sport") raw = sportData(raw);
         const def = category(id), value = {}, errors = {};
         // 阶段一：仅处理白名单字段，不将 API 附加字段直接保存或插入 HTML。
         for (const field of def.fields) {
@@ -172,9 +186,9 @@ __fluffyModules["catalog.js"] = (() => {
      * 功能：用实际确认内容生成猫咪笔路，完整营养信息仍保留在历史。
      */
     function rows(record) {
-        const v = record.data, id = record.category;
+        const id = record.category, v = id === "sport" ? sportData(record.data) : record.data;
         if (id === "sport")
-            return [{ label: "Activity", value: `${v.activity} · ${v.distanceKm} km` }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes }];
+            return [{ label: "Activity", value: v.activity }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes }];
         if (id === "food")
             return [{ label: v.meal || "Meal", value: v.foods }, { label: "Nutrition · 估算", value: v.calories != null ? `约 ${v.calories} kcal` : v.portion || "份量未记录" }, { label: "Notes", value: v.notes || (v.protein != null ? `蛋白质约 ${v.protein} g` : "未填写备注") }];
         if (id === "mood")
@@ -195,7 +209,7 @@ __fluffyModules["catalog.js"] = (() => {
             return { value: "— —", sub: "尚未记录" };
         const v = record.data;
         return ({
-            sport: { value: `${v.distanceKm} km`, sub: v.activity }, food: { value: v.calories == null ? v.meal : `约 ${v.calories}`, sub: v.calories == null ? v.foods : "kcal · " + v.meal }, mood: { value: v.mood, sub: v.reason || "自己的感受" }, sleep: { value: `${v.hours} h`, sub: v.quality }, face: { value: "已记录", sub: v.feeling }, focus: { value: `${Math.round((record.focus?.elapsedMs ?? v.durationMinutes * 60000) / 6000) / 10} min`, sub: v.task }
+            sport: { value: `${v.durationMinutes} min`, sub: v.activity }, food: { value: v.calories == null ? v.meal : `约 ${v.calories}`, sub: v.calories == null ? v.foods : "kcal · " + v.meal }, mood: { value: v.mood, sub: v.reason || "自己的感受" }, sleep: { value: `${v.hours} h`, sub: v.quality }, face: { value: "已记录", sub: v.feeling }, focus: { value: `${Math.round((record.focus?.elapsedMs ?? v.durationMinutes * 60000) / 6000) / 10} min`, sub: v.task }
         })[record.category];
     }
     /**
@@ -207,6 +221,6 @@ __fluffyModules["catalog.js"] = (() => {
         return [...new Set([...(Array.isArray(order) ? order : []), ...DEFAULT_ORDER])].filter(id => CATEGORIES[id]).slice(0, 6);
     }
     return {
-        CATEGORIES, DEFAULT_ORDER, category, validate, rows, summary, validOrder
+        CATEGORIES, DEFAULT_ORDER, category, sportData, validate, rows, summary, validOrder
     };
 })();

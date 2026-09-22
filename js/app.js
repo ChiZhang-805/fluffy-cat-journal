@@ -7,6 +7,9 @@ __fluffyModules["app.js"] = (() => {
     const { BailianSettings } = __fluffyModules["bailian-settings.js"];
     const { AudioSession } = __fluffyModules["audio-session.js"];
     const Sleep = __fluffyModules["sleep-time.js"];
+    const { TimeRangePicker } = __fluffyModules["time-range-picker.js"];
+    const { FormLayout } = __fluffyModules["form-layout.js"];
+    const BubbleCopy = __fluffyModules["bubble-copy.js"];
     const { SpeechSession } = __fluffyModules["speech.js"];
     const { MicrophonePermission } = __fluffyModules["microphone-permission.js"];
     const { HoldGesture } = __fluffyModules["gesture.js"];
@@ -54,6 +57,7 @@ __fluffyModules["app.js"] = (() => {
     });
     const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
     let activeSpeech = speech, bailianSettings;
+    let timeRange = null, formLayout = null;
     let gesture, board, toastTimer, homeBubbleTimer, cameraVideo = null, sheetReturn = null, wave = Array(72).fill(0), lastTimerText = "", lastUI = "", lastFocusSave = 0;
     /**
      * 输入：文字、error。
@@ -61,10 +65,8 @@ __fluffyModules["app.js"] = (() => {
      * 功能：在猫咪右上角给出简短状态，不常驻冗余说明。
      */
     function bubble(text, error = false) {
-        $("entry-bubble").textContent = text.length > 44 ? "我整理好了，看看下方的提示。" : text;
-        $("entry-bubble").classList.toggle("error", error);
-        if (text.length > 44)
-            toast(text);
+        const detail = BubbleCopy.render($("entry-bubble"), text, error);
+        if (detail) toast(detail);
     }
     /**
      * 输入：text。
@@ -86,9 +88,10 @@ __fluffyModules["app.js"] = (() => {
      */
     function homeBubble(text) {
         clearTimeout(homeBubbleTimer);
-        $("home-bubble").textContent = text;
+        const detail = BubbleCopy.render($("home-bubble"), text);
+        if (detail) toast(detail);
         $("home-bubble").classList.add("visible");
-        homeBubbleTimer = setTimeout(() => $("home-bubble").classList.remove("visible"), 3200);
+        homeBubbleTimer = setTimeout(() => BubbleCopy.render($("home-bubble"), "home"), 4200);
     }
     /**
      * 输入：title、builder、onClose。
@@ -96,6 +99,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：打开手机内操作面板，管理焦点和关闭回调。
      */
     function showSheet(title, builder, onClose = null) {
+        timeRange?.close(false);
         closeSheet(false);
         board?.cancel();
         gesture?.disarm();
@@ -167,6 +171,7 @@ __fluffyModules["app.js"] = (() => {
      * 功能：集中切页与资源清理，输入草稿保留，退出摄像头/录音。
      */
     function navigate(scene, options = {}) {
+        timeRange?.close(false);
         if (animation.scene === "entry")
             preserveDraft();
         cancelWork(false);
@@ -185,6 +190,7 @@ __fluffyModules["app.js"] = (() => {
         if (scene === "home") {
             board.update();
             updateHomeStats();
+            homeBubble("home");
         }
         if (["history", "tasks", "profile"].includes(scene))
             renderPage(scene);
@@ -213,7 +219,8 @@ __fluffyModules["app.js"] = (() => {
         state.taskId = null;
         state.estimated = Boolean(record?.estimated);
         state.source = "manual";
-        const initial = values || state.drafts[id] || {};
+        const stored = values || state.drafts[id] || {};
+        const initial = id === "sport" ? Catalog.sportData(stored) : stored;
         if (id === "sleep" && !record)
             state.sleepDates = { bedDate: initial.bedDate || "", wakeDate: initial.wakeDate || "" };
         renderForm(initial);
@@ -257,6 +264,8 @@ __fluffyModules["app.js"] = (() => {
             updateFieldDisplay(f, input);
             input.setAttribute("aria-invalid", "false");
         }
+        timeRange?.sync();
+        formLayout?.schedule();
         preserveDraft();
         return protectedCount;
     }
@@ -279,6 +288,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function makeField(field, value) {
         const label = el("label", "field"), head = el("span", "field-header"), name = el("span", "", field.label);
+        label.dataset.field = field.key;
         head.append(name);
         label.append(head);
         const input = el(field.type === "textarea" ? "textarea" : "input");
@@ -359,6 +369,10 @@ __fluffyModules["app.js"] = (() => {
     function renderForm(values = {}) {
         // 阶段一：读取类别并清理上一个表单，不清理其他类别草稿。
         const def = Catalog.category(state.category), form = $("entry-form");
+        timeRange?.destroy();
+        timeRange = null;
+        formLayout?.destroy();
+        formLayout = null;
         form.replaceChildren();
         form.dataset.category = state.category;
         state.versions = {};
@@ -398,7 +412,16 @@ __fluffyModules["app.js"] = (() => {
         const mainFields = def.fields.filter(f => !f.group && !(def.photo && f.key === "notes"));
         mainFields.forEach(f => {
             state.versions[f.key] = 0;
-            form.append(makeField(f, values[f.key]));
+            if (state.category === "sleep" && f.key === "bedtime") {
+                timeRange = new TimeRangePicker($("screen"), values, key => {
+                    state.versions[key] = (state.versions[key] || 0) + 1;
+                    state.sleepDates = {};
+                    preserveDraft();
+                });
+                form.append(timeRange.element);
+            } else if (!(state.category === "sleep" && f.key === "wakeTime")) {
+                form.append(makeField(f, values[f.key]));
+            }
         });
         if (def.fields.some(f => f.group)) {
             const details = el("details", "nutrition-details"), summary = el("summary", "", "营养信息 · 估算"), grid = el("div", "nutrition-fields");
@@ -417,12 +440,7 @@ __fluffyModules["app.js"] = (() => {
                 form.append(makeField(last, values[last.key]));
             }
         }
-        if (state.category === "focus") {
-            const b = el("button", "form-secondary", "放入待办，稍后开始");
-            b.type = "button";
-            b.onclick = saveTaskLater;
-            form.append(b);
-        }
+        formLayout = new FormLayout($("entry-panel"), form);
         $("speech-transcript").textContent = `说说今天的${def.name}吧。`;
     }
     /**
@@ -433,6 +451,7 @@ __fluffyModules["app.js"] = (() => {
     function showErrors(errors = {}) {
         for (const f of Catalog.category(state.category).fields)
             $(`field-${f.key}`)?.setAttribute("aria-invalid", String(Boolean(errors[f.key])));
+        timeRange?.sync();
     }
     /**
      * 输入：无。
@@ -446,8 +465,13 @@ __fluffyModules["app.js"] = (() => {
             const key = Object.keys(checked.errors)[0];
             bubble(checked.errors[key], true);
             const input = $(`field-${key}`);
-            input?.scrollIntoView({ block: "nearest" });
-            input?.focus({ preventScroll: true });
+            if (state.category === "sleep" && ["bedtime", "wakeTime"].includes(key)) {
+                timeRange?.element.scrollIntoView({ block: "nearest" });
+                timeRange?.focus(key);
+            } else {
+                input?.scrollIntoView({ block: "nearest" });
+                input?.focus({ preventScroll: true });
+            }
             return null;
         }
         return checked.value;
@@ -712,6 +736,12 @@ __fluffyModules["app.js"] = (() => {
      */
     function showDraft(warnings = []) {
         const note = $("draft-note");
+        // 专注页不显示成功说明面板；真实异常或须核对信息仍用短暂提示告知。
+        if (state.category === "focus") {
+            if (note) { note.hidden = true; note.textContent = ""; }
+            if (warnings.length) toast(warnings.join(" "));
+            return;
+        }
         if (note) {
             note.hidden = false;
             note.textContent = warnings.length ? warnings.join(" ") : "整理好了，请核对。";
@@ -742,8 +772,11 @@ __fluffyModules["app.js"] = (() => {
             if (serial !== state.serial || state.category !== "focus")
                 return;
             fillForm({ durationMinutes: result.minutes }, version);
-            showDraft([`预计 ${result.minutes} 分钟。${result.reason} 可以修改后再开始。`]);
-            bubble("只是一个估计，你来决定。");
+            // 保留可修改分钟数，但不插入黄色说明，也不自动启动专注。
+            const note = $("draft-note");
+            note.hidden = true;
+            note.textContent = "";
+            bubble("estimated");
         }
         catch (e) {
             if (serial === state.serial && e.name !== "AbortError")
@@ -768,7 +801,8 @@ __fluffyModules["app.js"] = (() => {
         preview.classList.toggle("has-image", Boolean(image));
         $("analyze-photo").hidden = !image;
         if (!image) {
-            preview.style.height = "148px";
+            preview.style.height = state.category === "face" ? "165px" : "96px";
+            formLayout?.schedule();
             const placeholder = el("span", "photo-empty");
             placeholder.innerHTML = icon("photo");
             placeholder.append(el("span", "", "等待照片"));
@@ -1604,7 +1638,7 @@ __fluffyModules["app.js"] = (() => {
         };
         $("home-cat").onclick = () => {
             animation.petAt = animation.idle;
-            homeBubble(["嗯？我在呢。", "慢慢来，今天也陪着你。", "摸摸收到了。谢谢你。"][(Math.floor(animation.idle / 3)) % 3]);
+            homeBubble(["嗯？我在呢", "慢慢来就好\n我会陪着你", "摸摸收到了\n谢谢你呀喵"][(Math.floor(animation.idle / 3)) % 3]);
         };
         bindContextHold($("home-cat"), chatSheet);
         $("home-menu").onclick = homeMenu;
@@ -1612,7 +1646,7 @@ __fluffyModules["app.js"] = (() => {
         $("today-stat").onclick = () => navigate("history");
         bindContextHold($("today-stat"), () => {
             updateHomeStats();
-            homeBubble(`今天已经记录了 ${Store.stats().today} 个类别。`);
+            homeBubble(`今天记了${Store.stats().today}项\n都好好收着呢`);
         });
         $("days-stat").onclick = () => navigate("profile");
         bindContextHold($("days-stat"), () => navigate("profile"));
@@ -1728,6 +1762,7 @@ __fluffyModules["app.js"] = (() => {
     renderForm({});
     resizePhone();
     bind();
+    homeBubble("home");
     animation.reducedMotion = Boolean(Store.read("fluffy-reduced-motion", matchMedia("(prefers-reduced-motion: reduce)").matches));
     document.body.classList.toggle("reduce-motion", animation.reducedMotion);
     animation.initialize().catch(() => {
@@ -1735,7 +1770,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
+            animation, state, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};
