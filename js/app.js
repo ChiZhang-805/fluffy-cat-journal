@@ -8,6 +8,7 @@ __fluffyModules["app.js"] = (() => {
     const { AudioSession } = __fluffyModules["audio-session.js"];
     const Sleep = __fluffyModules["sleep-time.js"];
     const Locale = __fluffyModules["entry-i18n.js"];
+    const EntryAction = __fluffyModules["entry-action.js"];
     const { EntryMenu } = __fluffyModules["entry-menu.js"];
     const { TimeRangePicker } = __fluffyModules["time-range-picker.js"];
     const { FormLayout } = __fluffyModules["form-layout.js"];
@@ -49,6 +50,7 @@ __fluffyModules["app.js"] = (() => {
     const api = new DeepSeekClient({ config: CONFIG, model: CONFIG.model });
     const bailian = new BailianClient({ config: CONFIG });
     const state = {
+        entryComplete: false, entryCanSubmit: false,
         recordDate: Sleep.dateKey(), draftDates: {}, editingId: null, sleepDates: {}, emotionDraft: null, voiceBackend: "text",
         category: "sport", phase: "idle", serial: 0, task: null, record: null, source: "manual", estimated: false, versions: {}, drafts: {}, keySerial: 0, keyTask: null, filter: "all", sheetClose: null, focusRecord: null, timerNotified: false, taskId: null
     };
@@ -60,6 +62,7 @@ __fluffyModules["app.js"] = (() => {
     const rawAudio = new AudioSession({ onLevel: audioLevel, onStarted: listeningStarted, onError: voiceFailed, onLimit: releaseSpeech });
     let activeSpeech = speech, bailianSettings;
     let timeRange = null, formLayout = null, review = null, entryMenu = null;
+    let lastEntryAction = "";
     let gesture, board, toastTimer, homeBubbleTimer, cameraVideo = null, sheetReturn = null, wave = Array(72).fill(0), lastTimerText = "", lastUI = "", lastFocusSave = 0;
     /**
      * 输入：文字、error。
@@ -98,11 +101,11 @@ __fluffyModules["app.js"] = (() => {
         homeBubbleTimer = setTimeout(() => BubbleCopy.render($("home-bubble"), "home"), 4200);
     }
     /**
-     * 输入：title、builder、onClose。
+     * 输入：title、builder、onClose、options（可选标题图标和面板类型）。
      * 输出：面板内容节点。
      * 功能：打开手机内操作面板，管理焦点和关闭回调。
      */
-    function showSheet(title, builder, onClose = null) {
+    function showSheet(title, builder, onClose = null, options = {}) {
         timeRange?.close(false);
         entryMenu?.close(false);
         closeSheet(false);
@@ -110,7 +113,17 @@ __fluffyModules["app.js"] = (() => {
         gesture?.disarm();
         sheetReturn = document.activeElement;
         state.sheetClose = onClose;
-        $("sheet-title").textContent = Locale.t(title);
+        // 标题图标与面板类型仅作用于本次弹层；下一次打开时完整重置。
+        const heading = $("sheet-title");
+        heading.replaceChildren();
+        $("sheet").dataset.variant = options.variant || "";
+        if (options.icon) {
+            const symbol = el("span", "sheet-title-icon");
+            symbol.setAttribute("aria-hidden", "true");
+            symbol.innerHTML = icon(options.icon);
+            heading.append(symbol);
+        }
+        heading.append(el("span", "sheet-title-text", Locale.t(title)));
         $("sheet-body").replaceChildren();
         $("sheet-layer").hidden = false;
         builder?.($("sheet-body"));
@@ -263,8 +276,8 @@ __fluffyModules["app.js"] = (() => {
         const remove=$("photo-preview")?.querySelector(".photo-remove");if(remove){remove.textContent=Locale.t("移除","Remove");remove.setAttribute("aria-label",Locale.t("移除照片"));}
         $("back").setAttribute("aria-label",Locale.t("返回"));$("cancel-voice").textContent=Locale.t("取消");$("edit-record").textContent=Locale.t("修改记录");
         $("entry-panel").setAttribute("aria-label",Locale.t("填写生活记录","Journal entry"));
-        $("confirm-entry").setAttribute("aria-label",Locale.t("确认并继续；长按可以说话","Confirm and continue; hold to speak"));
-        $("hold-help").textContent=Locale.t("点击提交手动记录；长按说话，松开后整理。","Tap to confirm. Hold to speak, release to finish. Hold Space with the keyboard; Escape cancels.");
+        refreshEntryCompletion();
+        synchronizeEntryAction(animation);
         entryMenu?.sync(); formLayout?.schedule();
     }
     /** 输入：code（zh或en）。输出：无。功能：语言偏好贯穿六类记录与回顾；不重置录入、不调用模型翻译原文。 */
@@ -322,8 +335,46 @@ __fluffyModules["app.js"] = (() => {
      * 功能：切页前在内存保留草稿，不自动上传或当作记录。
      */
     function preserveDraft() {
-        if ($("entry-form").dataset.category === state.category)
-            { state.drafts[state.category] = rawForm(); state.draftDates[state.category] = state.recordDate; }
+        if ($("entry-form").dataset.category === state.category) {
+            state.drafts[state.category] = rawForm();
+            state.draftDates[state.category] = state.recordDate;
+            refreshEntryCompletion();
+            synchronizeEntryAction(animation);
+        }
+    }
+    /**
+     * 输入：无，读取当前类别的字段与记录日期。
+     * 输出：无，缓存完成度和原有可提交状态。
+     * 功能：仅在输入、AI回填、日期或表单变化时校验，避免每帧读取和验证全部控件。
+     */
+    function refreshEntryCompletion() {
+        if ($("entry-form").dataset.category !== state.category) return;
+        const status = EntryAction.inspect(state.category, rawForm(), { recordDate: state.recordDate });
+        state.entryComplete = status.complete;
+        state.entryCanSubmit = status.canSubmit;
+    }
+    /**
+     * 输入：a（当前动画控制器）。
+     * 输出：无，仅在状态改变时更新按钮的文字、布局和可访问名称。
+     * 功能：同一按钮在倾诉提示与继续动作间切换；不搬动记录页的语音面板。
+     */
+    function synchronizeEntryAction(a) {
+        // 阶段一：组合语言、补记和请求状态，录音中的阶段始终优先。
+        const view = EntryAction.describe({
+            category: state.category, complete: state.entryComplete, phase: state.phase,
+            language: Locale.language(), editing: Boolean(state.editingId),
+            past: state.recordDate < Sleep.dateKey(), loaded: a.ready
+        });
+        const signature = JSON.stringify(view);
+        if (lastEntryAction === signature) return;
+        lastEntryAction = signature;
+        // 阶段二：未填满仍允许长按或按既有规则手动提交，不新增营养必填/自动录音。
+        const button = $("confirm-entry");
+        button.dataset.action = view.mode;
+        button.disabled = view.disabled;
+        button.setAttribute("aria-label", view.accessibleLabel);
+        $("confirm-label").textContent = view.label;
+        $("hold-help").textContent = view.help;
     }
     /**
      * 输入：fields、snapshot（请求开始版本）。
@@ -650,6 +701,7 @@ __fluffyModules["app.js"] = (() => {
      */
     function setPhase(phase) {
         state.phase = phase;
+        if (phase === "idle") refreshEntryCompletion();
         animation.entryMode = phase === "thinking" ? "thinking" : ["listening", "requesting"].includes(phase) ? "listening" : "idle";
         $("confirm-entry").classList.toggle("holding", phase === "listening");
         $("confirm-entry").dataset.pending = String(phase === "thinking");
@@ -1563,10 +1615,7 @@ __fluffyModules["app.js"] = (() => {
         $("primary").classList.toggle("white", hero);
         $("primary").disabled = !a.ready || (hero ? a.time < 4.93 : record ? a.time < a.writeEnd + 3.5 : false);
         $("primary-label").textContent = Locale.t(hero ? "完成" : "继续");
-        $("confirm-entry").disabled = !a.ready || ["authorizing"].includes(state.phase);
-        $("confirm-label").textContent = Locale.t(({
-            idle: state.category === "focus" ? state.editingId ? "保存修改" : state.recordDate < Sleep.dateKey() ? "补记专注" : "开始专注" : "确认并继续", authorizing: "等待麦克风…", requesting: "等待麦克风…", listening: "松开结束", thinking: "停止整理"
-        })[state.phase]);
+        synchronizeEntryAction(a);
         entryMenu?.sync();
         $("hero-quote").style.opacity = M.range(a.time, 1.5, 2.5);
         $("hero-subtitle").style.opacity = M.range(a.time, .8, 1.5);
@@ -1729,6 +1778,8 @@ __fluffyModules["app.js"] = (() => {
                     cancelWork();
             }
         }, CONFIG.longPressMs || 420);
+        // 原生自动填充或辅助技术有时只触发 change；与 input 共用完成度更新。
+        $("entry-form").addEventListener("change", preserveDraft);
         $("entry-form").addEventListener("submit", e => {
             e.preventDefault();
             confirmManual();
@@ -1883,7 +1934,7 @@ __fluffyModules["app.js"] = (() => {
     });
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
-            animation, state, review, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
+            animation, state, review, refreshEntryCompletion, synchronizeEntryAction, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, estimateTime, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
     return {};

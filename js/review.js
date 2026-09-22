@@ -304,12 +304,55 @@ __fluffyModules["review.js"] = (() => {
         }
         /** 输入：无。输出：无。功能：随时阅读已消逝的短句；会话只在页面内存中。 */
         historySheet() { this.h.showSheet(this.t("对话记录", "Conversation"), root => { const wrap = node("div", "review-chat-log"); if (!this.history().length) wrap.append(node("p", "review-dialog-copy", this.t("聊过的话，会留在这里。", "Your conversation will appear here."))); for (const turn of this.history()) wrap.append(node("p", "review-log-turn " + turn.role, turn.content)); root.append(wrap); }); }
-        /** 输入：无。输出：无。功能：无语音支持或不方便出声时同一上下文文字交流，不再次提交记录。 */
+        /**
+         * 输入：无，使用当前回顾页的只读上下文和语言。
+         * 输出：无，打开带独立输入区与发送按钮的文字聊天弹层。
+         * 功能：消息通过原有陪伴对话链路发送；支持多行、输入法与焦点回收，不修改记录。
+         */
         textSheet() {
             this.h.showSheet(this.t("文字聊聊", "Text chat"), root => {
-                const label = node("label", "field", this.t("想和小猫说什么", "What would you like to say?")), input = node("textarea"); input.maxLength = 800; input.rows = 4; input.style.cssText = "width:100%;min-height:115px;border:1px solid #dfe9ec;border-radius:15px;padding:12px;background:#f5f9f8;color:#345a77;font:inherit;resize:none"; label.append(input); root.append(label);
-                const b = node("button", "sheet-action", this.t("说给小猫", "Send to the cat")); b.onclick = () => { if (!input.value.trim()) { input.focus(); return; } const text = input.value.trim(); this.h.closeSheet(); this.send(text); }; root.append(b); setTimeout(() => input.focus({ preventScroll: true }), 0);
-            });
+                // 阶段一：标题使用聊天图标，输入区与按钮由独立间距分开，不影响其他弹层。
+                const form = node("form", "review-text-compose");
+                const label = node("label", "review-text-field");
+                const input = node("textarea", "review-text-input");
+                input.id = "review-text-input";
+                input.name = "message";
+                input.maxLength = 800;
+                input.rows = 4;
+                input.setAttribute("aria-label", this.t("想和小猫说什么", "What would you like to say?"));
+                label.htmlFor = input.id;
+                label.append(node("span", "", this.t("想和小猫说什么", "What would you like to say?")), input);
+                const send = node("button", "sheet-action review-text-submit");
+                send.type = "submit";
+                send.innerHTML = icon("send");
+                send.append(node("span", "", this.t("说给小猫", "Send to the cat")));
+                form.append(label, send);
+                root.append(form);
+
+                // 阶段二：空白不发送；按钮、Ctrl/Cmd+Enter 共享提交入口，每次打开最多发送一次。
+                let sent = false;
+                form.addEventListener("submit", event => {
+                    event.preventDefault();
+                    if (sent || !form.isConnected || $("sheet-layer").hidden || !this.active) return;
+                    const text = input.value.trim();
+                    if (!text) { input.setAttribute("aria-invalid", "true"); input.focus(); return; }
+                    sent = true;
+                    send.disabled = true;
+                    this.h.closeSheet();
+                    this.send(text);
+                });
+                input.addEventListener("input", () => input.removeAttribute("aria-invalid"));
+                input.addEventListener("keydown", event => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !event.isComposing && event.keyCode !== 229) {
+                        event.preventDefault();
+                        form.requestSubmit();
+                    }
+                });
+                // 阶段三：只聚焦仍打开的当前面板，关闭后的晚到定时器不抢焦点。
+                setTimeout(() => {
+                    if (input.isConnected && !$("sheet-layer").hidden) input.focus({ preventScroll: true });
+                }, 0);
+            }, null, { icon: "chat", variant: "review-text" });
         }
         /** 输入：无。输出：Promise<Blob>。功能：本地绘制分享卡片，只包含可见回顾数据，不含Key、录音或对话历史。 */
         async makeShare() {
