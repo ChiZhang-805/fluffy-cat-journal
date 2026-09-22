@@ -1,8 +1,12 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Minimal workout companion; static GitHub Pages source",
-  "scripts": {"test": "node --test tests/core.test.cjs"},
-  "engines": {"node": ">=20"}
+  "description": "Six-category companion homepage with animated cat, editable journals, vision drafts and focus timer",
+  "scripts": {
+    "test": "node --test tests/core.test.cjs tests/home-core.test.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

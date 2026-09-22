@@ -97,13 +97,14 @@ window.CatActor = class {
         ctx.lineWidth = hero ? 3.75 : 4.2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        const xshift = look * 2.8;
+        const xshift = (hero ? (this.homeLook || 0) : look) * 2.8;
+        const heroBlink = hero ? Math.exp(-(((clock % 7.3 - 6.1) / .12) ** 2)) : 0;
         if (hero) {
             ctx.beginPath();
             ctx.moveTo(140 + xshift, 460);
-            ctx.quadraticCurveTo(152 + xshift, 452.5, 167 + xshift, 457);
+            ctx.quadraticCurveTo(152 + xshift, 452.5 + heroBlink * 5, 167 + xshift, 457);
             ctx.moveTo(199 + xshift, 458);
-            ctx.quadraticCurveTo(212 + xshift, 455, 226 + xshift, 463);
+            ctx.quadraticCurveTo(212 + xshift, 455 + heroBlink * 5, 226 + xshift, 463);
             ctx.stroke();
             ctx.lineWidth = 3.4;
             ctx.beginPath();
@@ -140,7 +141,9 @@ window.CatActor = class {
             p = 0;
         const lift = M.range(p, .02, .34) * (1 - M.range(p, .58, .98));
         const load = M.range(p, 0, .16) * (1 - M.range(p, .16, .32));
-        return { left: M.point([154, 609], [92, 503], lift), right: M.point([194, 609], [286, 500], lift), lift, load };
+        return {
+            left: M.point([154, 609], [92, 503], lift), right: M.point([194, 609], [286, 500], Math.max(lift, (this.companionPet || 0) * .32)), lift, load
+        };
     }
     /**
      * 输入：ctx、t（连续时间）。
@@ -324,7 +327,10 @@ window.CatActor = class {
         ctx.rotate(-.27 * headSleep + look * .035 + (pose.pet || 0) * .022 + (pose.headTilt || 0) + attention * Math.sin(idle * 1.4) * .006);
         ctx.scale(1 - .12 * headSleep, 1 - .10 * headSleep);
         ctx.translate(-191, -342);
-        this.texture(ctx, 'head', (x, y) => { const ear = Math.exp(-(((x - 250) / 28) ** 2 + ((y - 214) / 33) ** 2)), cheek = Math.exp(-(((x - 65) / 45) ** 2 + ((y - 339) / 58) ** 2)), right = Math.exp(-(((x - 296) / 30) ** 2 + ((y - 335) / 45) ** 2)); return [x + Math.sin(idle * 1.8 - .4) * .45 * right + 10 * headSleep * ear + (pose.pet || 0) * ear * 2 + attention * ear * (2 + Math.sin(idle * 1.8)) + 26 * headSleep * cheek - 10 * headSleep * right, y + Math.sin(idle * 1.45) * .45 * M.clamp((380 - y) / 185) - 8 * headSleep * ear - attention * ear * 3 - thought * Math.sin(idle * 1.3) * .6 - 23 * headSleep * cheek - 16 * headSleep * M.clamp((y - 343) / 40)]; });
+        this.texture(ctx, 'head', (x, y) => {
+            const ear = Math.exp(-(((x - 250) / 28) ** 2 + ((y - 214) / 33) ** 2)), cheek = Math.exp(-(((x - 65) / 45) ** 2 + ((y - 339) / 58) ** 2)), right = Math.exp(-(((x - 296) / 30) ** 2 + ((y - 335) / 45) ** 2));
+            return [x + Math.sin(idle * 1.8 - .4) * .45 * right + 10 * headSleep * ear + (pose.pet || 0) * ear * 2 + attention * ear * (2 + Math.sin(idle * 1.8)) + 26 * headSleep * cheek - 10 * headSleep * right, y + Math.sin(idle * 1.45) * .45 * M.clamp((380 - y) / 185) - 8 * headSleep * ear - attention * ear * 3 - thought * Math.sin(idle * 1.3) * .6 - 23 * headSleep * cheek - 16 * headSleep * M.clamp((y - 343) / 40)];
+        });
         this.face(ctx, false, headSleep, look, idle);
         ctx.restore();
         // 阶段三：笔尖保持真实落点，再覆盖握笔爪和收拢后的前景尾巴。
@@ -347,7 +353,11 @@ window.CatActor = class {
             ctx.globalAlpha = a;
             ctx.fillStyle = '#66bd64';
             ctx.textAlign = 'center';
-            [[276, 257, 17], [301, 242, 21], [329, 222, 26]].forEach(([x, y, z], i) => { ctx.font = `700 ${z}px "Trebuchet MS",sans-serif`; ctx.globalAlpha = a * (.68 + .27 * Math.sin(idle * .85 - i * .55)); ctx.fillText('z', x, y - Math.sin(idle * .85 - i * .5) * 2.5); });
+            [[276, 257, 17], [301, 242, 21], [329, 222, 26]].forEach(([x, y, z], i) => {
+                ctx.font = `700 ${z}px "Trebuchet MS",sans-serif`;
+                ctx.globalAlpha = a * (.68 + .27 * Math.sin(idle * .85 - i * .55));
+                ctx.fillText('z', x, y - Math.sin(idle * .85 - i * .5) * 2.5);
+            });
             ctx.restore();
         }
     }

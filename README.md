@@ -1,141 +1,135 @@
-# 本次更新：状态栏与手写记录精修（2026-09-21）
+# Fluffy Cat · 六入口陪伴手记
 
-状态栏显示设备本地时间；活动项标题保留在小猫笔尖附近；手写横线跟随内容；补充中文手写笔路；Great job! 的手写与撒花协同加快 15%。
+可运行的 393 × 852 竖屏交互代码原型。基于已确认的小猫原图图层和旧版书写动画，新增浅蓝空间首页、六类记录、照片草稿和真实专注计时。不是图片轮播，也不是 iOS 原生安装包。
 
-详细改动、65 项检查和实机验证边界见 [`docs/detail-refinement.md`](docs/detail-refinement.md)。
+**构建标识：`fluffy-home-20260922-v4`。** 默认首页没有示例记录、虚构健康分数或预填任务。顶栏使用实际本地记录统计。
 
-已有仓库**不要再运行**下面历史说明中的新建仓库脚本。此次下载包外层的 `Update-GitHub-Pages.cmd` 用于更新当前仓库及原网址；它不新建仓库、不改变 Pages 配置、不强推、不覆盖未知版本。
+## 直接操作
 
----
+- 点击六张卡片：进入运动、饮食、情绪、睡眠、面部或专注。
+- 长按约 0.43 秒后松开：打开该组件的快捷菜单；保持按住并拖动：调整组件顺序。位置保存在当前浏览器。
+- 键盘：Tab 到卡片，Enter 进入；Shift+F10 打开菜单；Alt+方向键排序；Escape 取消。
+- 点击小猫：招呼回应。长按小猫或点击中央聊天按钮：打开对话入口，选择类别后整理文字，或者进入该类的长按语音记录。
+- 底部五个入口：主页、手记、交流、待办、我的。都是真实交互，不是无效图标。
 
-## 以下为原版部署与功能说明
+小猫用同一原画、独立前爪/尾巴/头部参数连续渲染；首页不是重复播放庆祝动作。没有走路/跳跃流程。减少动态效果可在“我的”设置。
 
-# Fluffy Cat · GitHub Pages 版
+## 六类记录
 
-保留原有 393 × 852 手机界面、同一只小猫、手动填写、长按语音、循环书写、放笔和原地趴睡。
-本版只精简 DeepSeek 设置并修复首次麦克风授权被长按取消逻辑打断的问题。
+| 类别 | 输入与行为 |
+|---|---|
+| 运动 | 项目、公里数、分钟数、备注。保留整数和小数。 |
+| 饮食 | 餐次、食物、份量、备注；拍照/选图，点击分析后生成可编辑营养估算。热量、蛋白质、碳水、脂肪、维生素单独展开。 |
+| 情绪 | 用户自己选择情绪、强度、事件与备注。不让模型从照片判断心情。 |
+| 睡眠 | 带日期的入睡/起床时间、主观感受、备注，正确计算跨午夜时长。 |
+| 面部 | 用户自评、可见眼周/皮肤外观、备注，支持照片。只记观察，不打颜值分、不判断身份、疾病或真实疲劳程度。 |
+| 专注 | 任务、预计分钟、目标；可让 AI 给出可修改的估时，也可放入待办再开始。 |
 
-## 在 Windows 上发布
+### 普通记录
 
-解压整个目录，双击 `Publish-GitHub-Pages.cmd`。
+输入或 AI 草稿 → **用户确认** → 小猫实际书写 → 放稳铅笔 → 点击继续 → Great job → 回到首页。
 
-脚本在你的电脑运行。缺少 GitHub CLI 时会先请求安装确认；未登录时打开 GitHub 的官方登录流程。
-随后验证登录账号为 `ChiZhang-805`，请你输入 `fluffy-cat-journal` 确认创建公开仓库。
-源码和猫咪素材将公开，不会上传 DeepSeek Key、录音、本机运动历史、`.env` 或其他个人目录。
-它不需要 Node.js 或 Git 来发布，使用 GitHub CLI 的 REST API 完成上传。
+书写内容来自确认记录；三组“标题、笔迹、横线”一起循环，正在写的标题留在笔尖附近；最终回到完整摘要。较详细营养数据在“手记”保留，而不是全挤在猫爪旁边。写完等待时小猫原地趴睡。
 
-脚本会新建仓库、原子提交源码、设置从默认分支根目录发布 Pages、开启 HTTPS，并查询构建状态。
-只有 HTTPS 页面返回 200 且包含本版标识时，才显示“部署成功”并打开 GitHub 实际返回的网页地址。
-结果同时写入本地 `deployment-result.json`（不上传仓库）。以后直接访问该网址，不再打开本地 HTML。
+### 专注
 
-同名仓库存在时，脚本会停止，不覆盖任何已有仓库。发布中途失败时，保留错误提示；
-如果仓库已经创建并上传，请在该仓库 Settings → Pages 检查发布分支及构建状态，不要反复创建同名仓库。
-也可以修改参数使用一个新的仓库名：
+确认任务和时间 → 真实倒计时 → 到时/主动完全停止 → 按实际用时保存 → Great job。
+
+暂停、休息、继续、重置、停止都有操作。重置和停止需要确认。暂停与休息不计为专注时间，休息另行累计。使用绝对截止时间而不是减少动画帧计数，刷新会恢复未结束会话。在首页点击正在计时的“专注”卡片直接回到计时器。
+
+“计时结束”不自动代表“任务完成”。待办完成状态由用户自己勾选。网页被系统终止时不能保证准时响铃/推送，本版没有声称实现原生后台闹钟；恢复网页后会按截止时间结算。
+
+## DeepSeek 与媒体
+
+外部右上角下拉菜单仅包含 DeepSeek Chat、API Key、启用/清除。Key 只保存在本次页面的客户端私有内存，不写入 localStorage、源码、历史记录、URL 或 GitHub。启用操作读取官方模型列表验证访问权限；无 Key 不假装 AI 成功，手动记录不受影响。
+
+公开模型 ID 在 `js/config.js`。按 2026-09-22 查询到的 DeepSeek 官方文档，`deepseek-flash` 接受文本和图片；本版用 Chat Completions 的 `image_url` 内容块发送重新编码的内存 JPEG。UI 保持名称 DeepSeek Chat。语音转写仍由浏览器 SpeechRecognition 提供，不把音频当成文本模型输入。
+
+首次长按先走独立麦克风授权，允许后再长按收音。松开后停止，整理成可编辑草稿，确认后才写。未授权、无语音支持、离线、无效响应、超时会提示，不填入演示数据。
+
+饮食/面部可以调用摄像头或选择照片；**选择照片后不自动上传**，用户再点“让小猫看看”才发送给模型。图片限制 15 MB、长边重编码至 1280px，并去除原始位置/EXIF 元数据。拍下、取消、切页或迟到授权都会关闭相机轨道。照片只在当前页面中处理，不写入历史或 GitHub。
+
+营养为估计；重量、油量和不可见配料无法确认时要求补充。维生素不强行输出没有依据的精确数值。面部输出仅作外观观察，不能作为疲惫测量或医疗结论。
+
+**生产环境建议：** GitHub Pages 是静态前端。本原型依赖服务商 CORS、浏览器媒体支持及网络；正式多人 APP 应将模型密钥与鉴权移至自有后端（可另接 Supabase 等服务）。本版没有声称已经部署 AI 后端、云同步、账号系统或医学验证。
+
+## 数据
+
+- 六类记录：`fluffy-six-journal-v1`。
+- 待办：`fluffy-six-tasks-v1`。
+- 排序：`fluffy-home-order-v1`。
+- 当前计时会话：`fluffy-active-focus-v1`。
+- 首次无新记录时，读取旧版 `fluffy-cat-minimal-records-v1` 兼容运动历史，不修改旧数据。
+- 重播不重复增加记录；从历史修改保留原 ID。“我的”可导出 JSON 或确认清除本机记录。
+- 这些数据是当前浏览器本地数据，不会在电脑与手机间自动同步。
+
+## 更新既有 GitHub Pages
+
+使用更新包外层的 **`Update-GitHub-Pages.cmd`**，不要再运行旧的 `Publish-GitHub-Pages.cmd` 创建仓库。
+
+更新器只处理清单中的已验证文本文件，保留现有原图和其他文件；先核对远程文件是否还是基线版本，再创建一个原子提交，非强制推进 main。遇到后续修改会停止，不覆盖。成功后轮询原 Pages URL 和新 CSS/JS 的内容 SHA，不重新配置 Pages 或更换域名。
+
+可在 Windows PowerShell 执行只读检查：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\publish.ps1 -RepositoryName fluffy-cat-journal-v2
+powershell -NoProfile -ExecutionPolicy Bypass -File .\update-existing.ps1 -CheckOnly
 ```
 
-启动器只对本次 PowerShell 进程指定执行策略，不修改系统执行策略，不要求把 GitHub 令牌发给任何人。
-发布脚本尚未在用户的真实 GitHub 登录环境中执行，因此本源码包不是“已经上线”的证明。
+本次助手实际尝试创建功能分支，GitHub 集成返回 **403 Resource not accessible by integration**，未创建分支/提交，未更改线上网站。更新包需要在你自己的 GitHub CLI 登录环境执行。没有向你索取 GitHub 令牌或 DeepSeek Key。
 
-## 页面设置
+## 开发
 
-右上角点击 DeepSeek，展开一个非模态下拉框，正常状态只有：
-
-- DeepSeek Chat
-- API Key 输入框
-- 启用 / 清除
-
-没有模型编号、个人原型说明、隐私说明大段文案或额外教程。
-输入框为密码类型；启用成功后输入框清空，密钥只存在当前页面的私有客户端实例中。
-点击框外或 Escape 可关闭。关闭正在验证的新 Key 不会删除此前有效的 Key。
-“清除”取消正在进行的语音/模型工作并清空 Key，但不删除已填写字段。
-浏览器仍会保存用户主动点击完成后的运动记录；Key 不会进入这些记录。
-
-## 麦克风：首次授权与录音分开
-
-旧版把 `window.blur` 和 `lostpointercapture` 当作取消录音。浏览器权限弹窗改变焦点时，
-这可能使尚未完成的授权失效，用户看到“已取消”，下一次又陷入同样的操作。
-
-新版流程：
-
-1. 第一次长按先查询浏览器权限。如果尚未授权，解除按压捕获，单独申请一次麦克风。
-2. 用户点击允许后立即关闭测试音频流，回到待机并提示“可以了，长按开始说话”。此时不转写、不发送音频。
-3. 再次长按才正式录音；已经授予权限时不走首次授权分支。松手停止输入，然后整理字段、连续进入书写。
-4. 正式录音时离开窗口、隐藏页面、取消或丢失指针捕获仍会停止收音，避免后台监听。
-5. 授权请求并发时复用同一 Promise；取消后晚到的音频流仍然立即关闭，不会迟到启动录音。
-
-网页不能绕过或永久授予浏览器权限。HTTPS 的稳定网站地址便于浏览器按站点记住许可。
-选择“访问此网站时允许”，而不是只允许一次；无痕模式、主动撤销、浏览器清理、企业策略
-或语音识别服务本身的权限仍可能让浏览器再次询问。
-
-## 语音及模型实现
-
-语音仍由浏览器 `SpeechRecognition` / `webkitSpeechRecognition` 转写；
-`getUserMedia` + Web Audio 读取实际音量，产生从右向左移动的柱形波。
-只有真实语音识别器触发 `onstart` 后，界面才显示“我在听”。
-转写文字发送给 DeepSeek 官方 Chat Completions 接口，返回可编辑的四个字段。
-音频没有被伪装成 DeepSeek 文本模型的输入，错误时不使用假记录补齐。
-
-界面名称是 DeepSeek Chat。公开配置里的实际模型 ID 沿用本项目当前接口配置，
-不在 UI 展示。服务商变更模型时，在 `js/config.js` 更新即可；不要把 Key 写在配置里。
-GitHub Pages 只托管静态文件；此原型从浏览器直连官方 API，仍依赖服务商跨域策略和网络可达性。
-面向公众的正式产品应将模型密钥和请求鉴权迁到自有后端；这不是本次新增的功能。
-
-## 源码结构和注释
-
-```text
-index.html                   手机布局及精简下拉框
-css/app.css                  原界面样式、下拉菜单、响应式布局
-js/app.js                    表单、语音、设置、动画状态衔接
-js/microphone-permission.js   首次授权控制器，不常驻占用麦克风
-js/speech.js                 音频输入、音量、真实识别事件
-js/gesture.js                短按/长按/松开/取消及授权前 disarm
-js/deepseek.js               私有内存 Key、API 校验及结构化整理
-js/model.js                  字段校验、编辑保护、循环位置
-js/animation.js              原有连续动画时序
-js/cat-actor.js               原图纹理、短前爪、尾巴、趴睡
-js/handwriting.js            实际记录的笔画
-assets/                     原猫图层，不是页面截图轮播
-publish.ps1                 Windows 新仓库及 Pages 发布脚本
-```
-
-新增函数头说明“输入、输出、功能”；较长逻辑在关键处使用“阶段一 / 阶段二 / 阶段三”注释。
-
-## 验证与限制
-
-运行不需要构建或 npm 依赖。开发时使用任意静态 HTTP 服务器，例如：
+不依赖 npm 包/CDN，不需要构建。使用任意静态 HTTP 服务器，例如：
 
 ```bash
 python -m http.server 8000
 ```
 
-单元测试（Node.js 20+）：
+打开 localhost:8000。HTTPS/localhost 更适合媒体权限测试。可用 `?debug=1` 显式开放时间轴调试对象；默认没有调试控件。单文件手动预览可运行：
 
 ```bash
-node --test tests/core.test.cjs
+python tools/build-standalone.py ../Fluffy-Cat-Home.html
 ```
 
-浏览器测试（Python）：
+本地文件 URL 的权限/跨域行为不等同于 HTTPS 线上页面，语音与照片 API 以部署后的网页为准。
+
+## 代码组织与注释
+
+```text
+index.html                  页面、状态栏、动态卡片及导航容器
+css/home.css                浅蓝空间、错落卡片、计时、照片和内部面板
+js/home-board.js            点击/长按/拖拽/键盘排序
+js/catalog.js               六类字段、校验、摘要、书写行
+js/journal-store.js         本地记录/待办、旧数据兼容
+js/focus-timer.js           绝对时钟、暂停、恢复、结束
+js/photo-input.js           图像重编码和相机生命周期
+js/ai-journal.js            文本/视觉草稿、估时、字段白名单
+js/app.js                   路由、表单、AI确认、历史与计时的衔接
+js/animation.js             首页待机、原连续书写与庆祝
+js/cat-actor.js             原图纹理、头、短前爪、尾巴及趴睡
+js/status-bar.js            设备本地时间
+```
+
+函数头写明输入、输出、功能；较长流程在内部标注阶段。所有上传的 UI 文本经 textContent/表单值处理；模型生成结果不作为 HTML 注入。
+
+## 测试与边界
 
 ```bash
+npm test
 python -m pip install -r tests/requirements.txt
-python -m playwright install chromium
-python tests/browser_test.py
+python tests/home_browser_test.py
 ```
 
-本轮通过 7 项单元测试和 26 项浏览器断言，包括授权弹窗失焦、清除/取消、晚到音频、
-长按松手只提交一次、短按原流程、六种视口下拉菜单边界。
-浏览器测试使用内存文档执行真实项目代码，但麦克风、权限状态和 API 是明确的测试替身。
-当前运行环境阻止浏览器访问本地服务器，所以没有把内存文档测试当作线上 URL 测试。
-尚未验证真实麦克风、真实 DeepSeek Key、iPhone/Safari、Windows 发布脚本的端到端执行和实际 Pages 上线。
+浏览器测试的 `CHROMIUM_BIN` 可指定本机 Chromium 路径。测试文档明确注入存储、网络等替身，不调用付费模型，也不请求真实设备的麦克风或摄像头。测试结果另见更新包 `validation/`；旧 `browser_test.py`/`refinement_test.py` 属于以前的运动专用布局，不应当作本版主页端到端测试。
 
-## 官方资料
+已进行 Chromium 内存文档的实际 DOM/Canvas 操作、计时恢复与模块接口回归。**尚未完成真实麦克风/摄像头、个人 Key、iPhone/Safari、Windows 更新器以及实际线上部署的端到端验证。** 状态栏时间是真实的，信号和电池仍是装饰；不声称原生状态栏逐像素一致。
 
-- 麦克风权限：https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
-- 权限查询：https://developer.mozilla.org/en-US/docs/Web/API/Permissions/query
-- GitHub Pages 发布源：https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
-- GitHub Pages REST：https://docs.github.com/en/rest/pages/pages
-- GitHub CLI 登录：https://cli.github.com/manual/gh_auth_login
-- DeepSeek Chat 接口：https://api-docs.deepseek.com/api/create-chat-completion/
+## 官方接口参考
+
+核对日期：2026-09-22。
+
+- DeepSeek 图像输入：https://api-docs.deepseek.com/zh-cn/guides/vision/
+- DeepSeek 思考开关：https://api-docs.deepseek.com/guides/thinking_mode/
+- 摄像头与麦克风：https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
+- 浏览器语音识别：https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition
+- Pages 发布源：https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
