@@ -12,6 +12,11 @@ def build(output: Path) -> None:
     """输入：output（输出文件）。输出：无，写入文件。功能：生成离线手动预览；联网功能仍需权限、网络与实际 Key。"""
     # 阶段一：只从已知站点目录读取静态资源。
     html = (ROOT / 'index.html').read_text(encoding='utf-8')
+    # 第三方SVG许可随单文件一起保留，不要求运行时加载外部文件。
+    license_path = ROOT / 'licenses' / 'Lucide-LICENSE.txt'
+    if license_path.exists():
+        notice = license_path.read_text(encoding='utf-8').replace('--', '—')
+        html = html.replace('<head>', '<head>\n<!-- Third-party icon license\n' + notice + '\n-->')
     assets = {}
     for image in (ROOT / 'assets').iterdir():
         if image.suffix not in ('.png', '.svg'):
@@ -38,4 +43,4 @@ def build(output: Path) -> None:
 
 
 if __name__ == '__main__':
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'Fluffy-Cat-v10.html')
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'Fluffy-Cat-v11.html')

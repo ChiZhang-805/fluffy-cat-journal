@@ -22,12 +22,16 @@ __fluffyModules["bailian-settings.js"] = (() => {
             this.button.onclick = () => this.root.hidden ? this.open() : this.close();
             document.getElementById("bailian-form").onsubmit = e => { e.preventDefault(); this.enable(); };
             document.getElementById("forget-bailian").onclick = () => this.clear();
-            document.addEventListener("pointerdown", e => { if (!this.root.hidden && !this.root.contains(e.target) && !this.button.contains(e.target))
-                this.close(false); });
-            document.addEventListener("keydown", e => { if (e.key === "Escape" && !this.root.hidden) {
-                e.preventDefault();
-                this.close();
-            } });
+            document.addEventListener("pointerdown", e => {
+                if (!this.root.hidden && !this.root.contains(e.target) && !this.button.contains(e.target))
+                    this.close(false);
+            });
+            document.addEventListener("keydown", e => {
+                if (e.key === "Escape" && !this.root.hidden) {
+                    e.preventDefault();
+                    this.close();
+                }
+            });
         }
         /**
          * 输入：无。
@@ -40,8 +44,18 @@ __fluffyModules["bailian-settings.js"] = (() => {
          * 输出：无。
          * 功能：取消未完成校验，关闭后不允许迟到响应启用Key。
          */
-        close(restoreFocus = true) { this.serial++; this.task?.abort(); this.task = null; this.root.hidden = true; this.input.value = ""; this.save.disabled = false; this.save.textContent = "启用"; this.button.setAttribute("aria-expanded", "false"); if (restoreFocus)
-            this.button.focus({ preventScroll: true }); }
+        close(restoreFocus = true) {
+            this.serial++;
+            this.task?.abort();
+            this.task = null;
+            this.root.hidden = true;
+            this.input.value = "";
+            this.save.disabled = false;
+            this.save.textContent = "启用";
+            this.button.setAttribute("aria-expanded", "false");
+            if (restoreFocus)
+                this.button.focus({ preventScroll: true });
+        }
         /**
          * 输入：无，读取输入框。
          * 输出：Promise<void>。
@@ -59,6 +73,7 @@ __fluffyModules["bailian-settings.js"] = (() => {
                 if (serial !== this.serial || controller.signal.aborted)
                     return;
                 this.client.setKey(key);
+                __fluffyModules["display-language.js"]?.retry();
                 this.indicator.classList.add("enabled");
                 this.task = null;
                 this.close();

@@ -1,74 +1,71 @@
-# Fluffy Cat · v10
+# Fluffy Cat · v11
 
-基于已部署的v9，仅调整数据回顾的空间利用和六类记录的长按提示。
-所有猫咪素材、表单、记录校验、计时、补记、聊天和API设置继续沿用。
+在现有v10基础上，统一图标、区分新增/修改记录，并补齐整个APP的英文阅读界面。
+保留同一只小猫、八个可用拖动位置、表单、语音、书写、趴睡、庆祝、补记和专注计时。
 
-## 本版行为
+## 本版使用
 
-回顾页：小猫、气泡和当天数据卡一起上移44设计像素；近7天卡片从222增至266像素，
-100分的最大柱高从79增至135像素。导航、聊天按钮和数据计算不变；情绪保留无高低排序的文字足迹。
+- 今天该类别还没有记录：点首页卡片进入表单。
+- 今天已经有记录：进入今天的回顾。正在计时的专注仍优先回到计时器。
+- 回顾三点菜单：「新增记录」再记一次；「修改记录」先选哪一条；「当日记录」查看时间顺序。
+- 所有六类都能新增或修改。情绪变化不覆盖之前的心情，面部也能保留不同时间的观察。
+- 普通聊天绝不直接改记录。明确要记/纠错时出现独立入口，确认目标后生成可编辑草稿，再由用户保存。
+- 已有睡眠多段按真实区间并集合计，防止重叠；其他累计指标从明细重算。
 
-未填完整的记录按钮按板块显示：
+## 图标和英文
 
-- 运动：长按和小猫聊运动；饮食：长按告诉小猫吃了啥。
-- 情绪：长按和小猫说心情；睡眠：长按和小猫聊睡眠。
-- 面部：长按说说今天的状态；专注：长按告诉小猫你的计划。
+主要类别/导航图标使用Lucide，细节、来源和许可证见 `docs/v11-icons.md`。
+现有状态栏与猫咪原图不变，未附带任何字体文件。
 
-中文/英文都提供对应短句；填完整后仍恢复“完成并继续”或专注对应动作。
-照片不计入填空，可选营养不会变成必填。
-记录页长按的波形仍在上方记录模块；回顾页才在底部绿色按钮里显示。
+语言可以从首页菜单、个人页、记录或回顾菜单切换。英文覆盖APP生成的UI、时间单位、
+图表、提示、历史和AI短句；中文仍保留原来的混排。
+用户原始记录与当前输入值不修改。英文阅读副本与数据分开：常用短语可离线展示，
+陌生中文自由文本需要现有已启用API翻译；无Key或失败时显示“Translation unavailable”，
+不伪造翻译，也不悄悄把中文原文改成英文。切回中文即可看原表达。
 
 ## 运行
 
-目录版不需要构建或安装npm依赖，使用静态服务器：
+纯静态目录，无npm运行依赖：
 
 ```sh
 python -m http.server 8000
 ```
 
-生成单文件手动预览：
+访问 `http://localhost:8000`。真实语音和AI功能仍需权限、服务可达和有效Key。
+Key仅在当前页面内存，不能写进源码。GitHub Pages不运行自有后端。
+用户记录保存在浏览器；本地预览和线上站点的存储相互独立。
+
+生成单文件（仅构建工具需要Python，代码运行不需要）：
 
 ```sh
-python tools/build-standalone.py ../Fluffy-Cat-v10.html
+python tools/build-standalone.py ../Fluffy-Cat-v11.html
 ```
-
-图片、CSS和JS均内嵌。语音/模型能力仍需网络、权限和实际Key，Key只保存在页面内存，
-不要写入源码或提交仓库。原记录保存在使用者的浏览器中；本地HTML和线上站点不自动同步记录。
 
 ## 更新现有网站
 
-完整解压外层更新包，运行 **Update-GitHub-Pages.cmd**，核对仓库名后确认。
-更新器基于旧文件SHA检查冲突，保留无关文件，用一次提交更新，再检查原网址上的资源。
-不新建仓库、不删除文件、不强推，也不改Pages配置。
-不要运行 `site/Publish-GitHub-Pages.cmd`，那是保留的初次创建工具。
-本轮GitHub连接写入返回403，下载源码不等于线上网站已经更新。
+完整解压**外层更新包**，双击 `Update-GitHub-Pages.cmd`，核对
+`ChiZhang-805/fluffy-cat-journal` 再确认。无需重建仓库或重设Pages。
+更新器核对旧文件SHA，冲突即停；不删除其他文件、不强推，提交后核对线上资源。
+不要运行旧的 `site/Publish-GitHub-Pages.cmd`，它只用于最初新建仓库。
+本轮GitHub集成写入实际返回403，源码交付不表示网站已经上线。
 
-## 主要实现
-
-- `js/review-layout.js`：Canvas与DOM共用回顾坐标，柱高纯函数。
-- `css/review.css`：更高的绘图区、独立刻度/日期空间。
-- `js/animation.js`：仅review场景更换平移坐标，不改角色、缩放或动作。
-- `js/review.js`：使用共享布局及同比柱高。
-- `js/entry-action.js`：分类长按提示，不改变完成度或录音状态。
-
-命名函数头保持“输入、输出、功能”，长函数按阶段注明作用。没有附带字体文件。
-
-## 验证
+## 验证与源代码
 
 ```sh
 npm test
 python -m pip install -r tests/requirements.txt
 python -m playwright install chromium
-python tests/refinement_v10_browser_test.py
+python tests/v11-browser.py
+python tests/media_v5_browser_test.py
 python tests/interaction_v9_browser_test.py
-python tests/review_browser_test.py
-python tests/review_extra_test.py
-python tests/standalone_v9_smoke.py ../Fluffy-Cat-v10.html
+python tests/refinement_v10_browser_test.py
+python tools/audit-comments.py
 ```
 
-脚本支持 `CHROMIUM_BIN`（浏览器路径）、`FLUFFY_RESULTS`（证据输出目录）。
-242项单元测试和306项浏览器/交付文件检查通过；65处命名函数/方法注释检查通过。
+浏览器默认 `/usr/bin/chromium`，其他环境通过 `CHROMIUM_BIN` 指定实际浏览器。
+使用真实源码、隔离存储；API/媒体为明确的fixture，不会花费用户额度。
+本轮的实现边界、语言原文保护、跨日意图、多条统计及测试方式详见
+`docs/v11-workflow-and-language.md`。外层 `verification` 保留实际结果。
 
-本环境的localhost浏览器导航被策略阻止，回归使用内存文档中的真实源码和隔离存储。
-语音/API场景使用明确替身；真实麦克风、Key、摄像头、iPhone/Safari及Windows更新器没有端到端实测。
-完整坐标、测试范围与限制见 [本版说明](docs/v10-recap-spacing-and-prompts.md)。
+函数头有输入、输出、功能；长函数按阶段组织。真实模型语义准确率、硬件麦克风/摄像头、
+iPhone/Safari、Windows更新上线尚未端到端实测，不能用测试替身结果替代。

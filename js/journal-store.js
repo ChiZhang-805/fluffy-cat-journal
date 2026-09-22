@@ -44,29 +44,40 @@ __fluffyModules["journal-store.js"] = (() => {
         // 阶段一：旧记录只在内存补出recordDate，不更改真实创建时间或删除历史数据。
         const normalized = [];
         for (const r of source) {
-            if (!r || typeof r.id !== "string" || !Number.isFinite(Date.parse(r.createdAt))) continue;
+            if (!r || typeof r.id !== "string" || !Number.isFinite(Date.parse(r.createdAt)))
+                continue;
             try {
                 const recordDate = dateOf(r), checked = validate(r.category, r.data || {}, true, { recordDate });
-                if (checked.ok) normalized.push({ ...r, recordDate, data: checked.value });
-            } catch { /* 损坏的单条记录不会阻断其他记录读取。 */ }
+                if (checked.ok)
+                    normalized.push({ ...r, recordDate, data: checked.value });
+            }
+            catch { /* 损坏的单条记录不会阻断其他记录读取。 */ }
         }
         // 阶段二：按事情发生日排序；今天补记上周，不得挤掉首页最近那天的摘要。
         return sortRecords(normalized).slice(0, 400);
     }
-
     /**
      * 输入：record（已确认记录）。
      * 输出：是否成功。
      * 功能：同一 ID 幂等保存，不随动画重播重复添加；不持久化照片或密钥。
      */
     function save(record) {
-        if (!record || typeof record.id !== "string" || !Number.isFinite(Date.parse(record.createdAt))) return false;
+        if (!record || typeof record.id !== "string" || !Number.isFinite(Date.parse(record.createdAt)))
+            return false;
         const recordDate = dateOf(record);
-        if (!Dates.validDate(recordDate) || recordDate > dayKey() || (record.recordDate && !Dates.validDate(record.recordDate))) return false;
+        if (!Dates.validDate(recordDate) || recordDate > dayKey() || (record.recordDate && !Dates.validDate(record.recordDate)))
+            return false;
         const checked = validate(record.category, record.data, true, { recordDate });
-        if (!checked.ok) return false;
+        if (!checked.ok)
+            return false;
+        // 阶段二：乐观并发校验；另一标签页已改过原条目时不能静默覆盖。
+        const prior = records().find(r => r.id === record.id);
+        if (record.expectedUpdatedAt !== undefined && (!prior || (prior.updatedAt || prior.createdAt) !== record.expectedUpdatedAt))
+            return false;
+        const changed = prior && (JSON.stringify(prior.data) !== JSON.stringify(checked.value) || dateOf(prior) !== recordDate);
+        const revisions = changed ? [...(prior.revisions || []), { data: prior.data, recordDate: dateOf(prior), updatedAt: prior.updatedAt || prior.createdAt }].slice(-8) : prior?.revisions || [];
         const safe = {
-            id: record.id, category: record.category, data: checked.value, recordDate, createdAt: record.createdAt, updatedAt: new Date().toISOString(), source: record.source || "manual", estimated: Boolean(record.estimated), focus: record.focus || null
+            id: record.id, category: record.category, data: checked.value, recordDate, createdAt: record.createdAt, updatedAt: new Date(Math.max(Date.now(), (Date.parse(prior?.updatedAt || prior?.createdAt) || 0) + 1)).toISOString(), source: record.source || "manual", revisions, estimated: Boolean(record.estimated), focus: record.focus || null
         };
         return write(KEY, sortRecords([safe, ...records().filter(item => item.id !== record.id)]).slice(0, 400));
     }
@@ -86,12 +97,20 @@ __fluffyModules["journal-store.js"] = (() => {
     function dayKey(date = new Date()) {
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     }
-    /** 输入：record（新记录或旧记录）。输出：本地日历日期键。功能：事情发生日独立于写入时间，兼容原来的睡眠日期。 */
+    /**
+     * 输入：record（新记录或旧记录）。
+     * 输出：本地日历日期键。
+     * 功能：事情发生日独立于写入时间，兼容原来的睡眠日期。
+     */
     function dateOf(record) {
         return Dates.validDate(record.recordDate) || Dates.validDate(record.data?.recordDate) || Dates.validDate(record.data?.wakeDate) || dayKey(new Date(record.createdAt));
     }
-    /** 输入：记录数组。输出：新排序数组。功能：按记录日倒序、同日按创建时间倒序，不修改调用者数组。 */
-    function sortRecords(list) { return [...list].sort((a,b) => dateOf(b).localeCompare(dateOf(a)) || Date.parse(b.createdAt)-Date.parse(a.createdAt)); }
+    /**
+     * 输入：记录数组。
+     * 输出：新排序数组。
+     * 功能：按记录日倒序、同日按创建时间倒序，不修改调用者数组。
+     */
+    function sortRecords(list) { return [...list].sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || Date.parse(b.createdAt) - Date.parse(a.createdAt)); }
     /**
      * 输入：list（历史）。
      * 输出：今日类别数、记录总数和陪伴天数。

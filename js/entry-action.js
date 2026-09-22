@@ -10,7 +10,6 @@ __fluffyModules["entry-action.js"] = (() => {
         face: Object.freeze({ zh: "长按说说今天的状态", en: "Hold to share your skin notes" }),
         focus: Object.freeze({ zh: "长按告诉小猫你的计划", en: "Hold to tell me your plan" })
     });
-
     /**
      * 输入：category（记录类别）、language（zh/en）。
      * 输出：该板块专属的单行长按提示；未知类别返回通用提示。
@@ -22,7 +21,6 @@ __fluffyModules["entry-action.js"] = (() => {
             ? INVITATIONS[category][lang]
             : (lang === "en" ? "Hold to tell your cat" : "长按和小猫说一说");
     }
-
     /**
      * 输入：category（六类记录之一）、raw（当前字段值）、context（记录日期等校验上下文）。
      * 输出：{complete, canSubmit, missing, invalid}，不包含用户原文。
@@ -37,7 +35,6 @@ __fluffyModules["entry-action.js"] = (() => {
         const invalid = Object.keys(checked.errors);
         return { complete: missing.length === 0 && checked.ok, canSubmit: checked.ok, missing, invalid };
     }
-
     /**
      * 输入：category、complete、phase、language、editing、past、loaded（当前交互状态）。
      * 输出：{mode, label, disabled, accessibleLabel, help}，用于同一个按钮的显示。
@@ -56,17 +53,19 @@ __fluffyModules["entry-action.js"] = (() => {
         if (Object.hasOwn(busy, phase)) {
             mode = "busy";
             label = busy[phase][english ? 1 : 0];
-        } else if (!complete) {
+        }
+        else if (!complete) {
             mode = "invite";
             label = invitationFor(category, language);
-        } else {
+        }
+        else {
             // 阶段二：专注必须先计时/补记，不能被普通记录的“继续”覆盖业务含义。
             mode = "confirm";
             label = category === "focus"
                 ? editing ? (english ? "Save changes" : "保存修改")
                     : past ? (english ? "Log past focus" : "补记专注")
                         : (english ? "Start focusing" : "开始专注")
-                : (english ? "Finish & continue" : "完成并继续");
+                : editing ? (english ? "Save changes" : "保存修改") : (english ? "Finish & continue" : "完成并继续");
         }
         // 阶段三：屏幕阅读器仍能发现手动提交入口，不把可选信息变为强制填报。
         const help = english
@@ -77,6 +76,5 @@ __fluffyModules["entry-action.js"] = (() => {
             : label + (mode === "confirm" ? (english ? "; hold to speak" : "；仍可长按说话") : "");
         return { mode, label, disabled: !loaded || phase === "authorizing", accessibleLabel, help };
     }
-
     return { inspect, describe, invitationFor };
 })();

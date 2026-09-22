@@ -21,7 +21,8 @@ __fluffyModules["home-board.js"] = (() => {
         }
         const seen = new Set();
         const slots = Array.from({ length: 9 }, (_, i) => {
-            if (i === RESERVED_SLOT) return null;
+            if (i === RESERVED_SLOT)
+                return null;
             const id = raw[i];
             if (!Object.hasOwn(CATEGORIES, id) || seen.has(id))
                 return null;
@@ -30,9 +31,13 @@ __fluffyModules["home-board.js"] = (() => {
         });
         // 先迁移旧版右下角组件到第一个合法空位，其余位置不变。
         for (const id of [raw[RESERVED_SLOT], ...DEFAULT_ORDER]) {
-            if (!Object.hasOwn(CATEGORIES, id) || seen.has(id)) continue;
+            if (!Object.hasOwn(CATEGORIES, id) || seen.has(id))
+                continue;
             const free = slots.findIndex((item, i) => i !== RESERVED_SLOT && item === null);
-            if (free >= 0) { slots[free] = id; seen.add(id); }
+            if (free >= 0) {
+                slots[free] = id;
+                seen.add(id);
+            }
         }
         return slots;
     }
@@ -57,10 +62,12 @@ __fluffyModules["home-board.js"] = (() => {
         if (x < 12 || x > 378 || y < 145 || y > 518)
             return -1;
         // 禁放区含边缘缓冲，不能被最近邻吸附误判为相邻组件。
-        if (x >= 255 && y >= 390) return -1;
+        if (x >= 255 && y >= 390)
+            return -1;
         let best = -1, distance = Infinity;
         for (let i = 0; i < SLOTS.length; i++) {
-            if (i === RESERVED_SLOT) continue;
+            if (i === RESERVED_SLOT)
+                continue;
             const [sx, sy] = SLOTS[i], d = Math.hypot(sx + 56 - x, sy + 55 - y);
             if (Math.abs(sx + 56 - x) <= 63 && Math.abs(sy + 55 - y) <= 64 && d < distance) {
                 best = i;
@@ -86,7 +93,8 @@ __fluffyModules["home-board.js"] = (() => {
                 const n = document.createElement("div");
                 n.className = "home-slot-guide";
                 n.dataset.slot = i;
-                if (i === RESERVED_SLOT) n.hidden = true;
+                if (i === RESERVED_SLOT)
+                    n.hidden = true;
                 n.setAttribute("aria-hidden", "true");
                 n.style.left = slot[0] + "px";
                 n.style.top = slot[1] + "px";
@@ -113,8 +121,10 @@ __fluffyModules["home-board.js"] = (() => {
             window.addEventListener("pointerup", e => this.end(e, false));
             window.addEventListener("pointercancel", e => this.end(e, true));
             window.addEventListener("blur", () => this.cancel());
-            document.addEventListener("visibilitychange", () => { if (document.hidden)
-                this.cancel(); });
+            document.addEventListener("visibilitychange", () => {
+                if (document.hidden)
+                    this.cancel();
+            });
             this.layout();
             this.update();
         }
@@ -145,8 +155,10 @@ __fluffyModules["home-board.js"] = (() => {
                 }, 430);
             });
             button.addEventListener("contextmenu", e => e.preventDefault());
-            button.addEventListener("lostpointercapture", e => { if (this.press?.pointerId === e.pointerId)
-                this.end(e, true); });
+            button.addEventListener("lostpointercapture", e => {
+                if (this.press?.pointerId === e.pointerId)
+                    this.end(e, true);
+            });
             button.addEventListener("click", e => {
                 e.preventDefault();
                 if (e.detail === 0 && performance.now() - (this.endedAt || -1000) > 250)
@@ -169,7 +181,7 @@ __fluffyModules["home-board.js"] = (() => {
          * 输出：无。
          * 功能：为辅助技术说明位置变化，不增加常驻说明文字。
          */
-        announce(text) { this.live.textContent = text; }
+        announce(text) { this.live.textContent = __fluffyModules["entry-i18n.js"]?.t(text) || text; }
         /**
          * 输入：PointerEvent。
          * 输出：无。
@@ -249,8 +261,10 @@ __fluffyModules["home-board.js"] = (() => {
          * 输出：无。
          * 功能：离开页面/失焦/取消时撤销未落下的拖动。
          */
-        cancel() { if (this.press)
-            this.end({ pointerId: this.press.pointerId }, true); }
+        cancel() {
+            if (this.press)
+                this.end({ pointerId: this.press.pointerId }, true);
+        }
         /**
          * 输入：可选 skip。
          * 输出：无。
@@ -286,12 +300,28 @@ __fluffyModules["home-board.js"] = (() => {
          * 输出：无。
          * 功能：摘要完全来自已确认记录，不生成虚构情绪分数。
          */
-        update() { const records = Store.records(); for (const [id, b] of this.cards) {
-            const r = records.find(r => r.category === id), s = summary(r);
-            b.querySelector(".widget-value").textContent = s.value;
-            b.querySelector(".widget-sub").textContent = s.sub;
-            b.classList.toggle("has-record", Boolean(r));
-        } }
+        update() {
+            const L = __fluffyModules["entry-i18n.js"], D = __fluffyModules["display-language.js"], R = __fluffyModules["review-data.js"];
+            const records = Store.records().filter(r => Store.dateOf(r) === Store.dayKey());
+            for (const [id, b] of this.cards) {
+                const list = records.filter(r => r.category === id), r = list[0], display = D?.record(r) || r, info = summary(display);
+                const current = list.length ? R?.daily(id, list, R.goals()) : null;
+                if (current && ["sport", "focus"].includes(id) && current.value != null)
+                    info.value = `${R.format(current.value)} min`;
+                if (current && id === "sleep" && current.value != null)
+                    info.value = `${R.format(current.value)} h`;
+                if (L?.language() === "en") {
+                    info.value = D?.text(info.value) || L.t(info.value);
+                    info.sub = D?.text(info.sub) || L.t(info.sub);
+                }
+                b.querySelector(".widget-name").textContent = L ? L.categoryName(id) : CATEGORIES[id].name;
+                b.querySelector(".widget-value").textContent = info.value;
+                b.querySelector(".widget-sub").textContent = info.sub;
+                b.classList.toggle("has-record", Boolean(r));
+                b.dataset.destination = r ? "review" : "entry";
+                b.setAttribute("aria-label", L?.language() === "en" ? `${L.categoryName(id)}: ${r ? 'view today’s review' : 'add an entry'}. Hold to move; Alt + arrow keys to reposition.` : `${CATEGORIES[id].name}：${r ? '查看今日回顾' : '点击记录'}，长按拖动；Alt 加方向键调整位置`);
+            }
+        }
     }
     return { HomeBoard, SLOTS, DEFAULT_SLOTS, normalizeSlots, exchange, slotAt, KEY, LEGACY_KEY, RESERVED_SLOT };
 })();
