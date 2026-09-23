@@ -63,7 +63,7 @@ __fluffyModules["review-conversation.js"] = (() => {
         if (!client?.configured) throw Error("先在右上角启用 AI，再和小猫聊吧。");
         // 阶段一：记录快照与对话是资料，不是系统指令。只传已经展示的回复，不传未显示尾句。
         const prior = memory?.messages || history.slice(-12).map(t => ({ role: t.role === "assistant" ? "assistant" : "user", content: String(t.content).slice(0, 2500) }));
-        const messages = [{ role: "system", content: prompt(lang, opening, false) }, { role: "user", content: JSON.stringify({ context: Data.context(view), earlierExcerpts: memory?.earlierExcerpts || [], conversationDelivery: memory?.delivery || [] }) }, ...prior];
+        const messages = [{ role: "system", content: prompt(lang, opening, false) + (__fluffyModules["companion-policy.js"]?.instructions(view.id, text, prior, lang) || "") }, { role: "user", content: JSON.stringify({ context: Data.context(view), earlierExcerpts: memory?.earlierExcerpts || [], conversationDelivery: memory?.delivery || [] }) }, ...prior];
         const instruction = opening ? (lang === "en" ? "Please greet me about this record." : "看看这份记录，和我聊一句吧。") : String(text).trim();
         if (!instruction) throw new (P?.AIError || Error)("no-text", "想说的话还没有填写。");
         if (instruction.length > 4000) throw new (P?.AIError || Error)("speech-too-long", "这段话有点长。");

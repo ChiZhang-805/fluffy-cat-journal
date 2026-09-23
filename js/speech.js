@@ -127,6 +127,7 @@ class SpeechSession {
                 this.finalText = finalText;
                 this.interimText = interimText;
                 this.callbacks.onText?.(this.text());
+                if (this.stopping) this.scheduleStableFinish();
             };
             recognition.onerror = event => {
                 if (generation !== this.serial || this.stopping && event.error === "aborted") return;
@@ -211,9 +212,21 @@ class SpeechSession {
         this.active = false;
         clearTimeout(this.limitTimer); clearTimeout(this.restartTimer);
         this.releaseAudio();
-        this.stopTimer = setTimeout(() => this.finishResult(), this.env.stopWaitMs ?? 4000);
+        this.stopTimer = setTimeout(() => this.finishResult(), this.env.stopWaitMs ?? 2200);
         try { this.recognition?.stop(); } catch { this.finishResult(); }
+        if (this.stopping) this.scheduleStableFinish();
         return this.resultPromise;
+    }
+    /**
+     * 输入：无，读取转写最终/临时结果。
+     * 输出：无。
+     * 功能：已有稳定最终句时尽早结束，临时尾句仍等待final/onend或有界超时，不切掉最后几个字。
+     */
+    scheduleStableFinish() {
+        clearTimeout(this.stableTimer);
+        if (!this.stopping || !this.text() || this.interimText || this.interimCarry) return;
+        const generation=this.serial;
+        this.stableTimer=setTimeout(() => { if (generation === this.serial && this.stopping && !this.interimText && !this.interimCarry) this.finishResult(); }, this.env.finalWaitMs ?? 180);
     }
     /**
      * 输入：无。
@@ -221,7 +234,7 @@ class SpeechSession {
      * 功能：只结算一次，并终止识别服务，防止松手后继续监听。
      */
     finishResult() {
-        clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.restartTimer); clearTimeout(this.limitTimer);
+        clearTimeout(this.stableTimer); clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.restartTimer); clearTimeout(this.limitTimer);
         const result = { text: this.text(), canceled: false, interim: Boolean(this.interimText || this.interimCarry), interrupted: this.interrupted };
         this.completedResult = result;
         this.active = false;
@@ -265,7 +278,7 @@ class SpeechSession {
         this.serial++;
         this.pending = this.active = this.stopping = false;
         this.completedResult = null;
-        clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.limitTimer); clearTimeout(this.restartTimer);
+        clearTimeout(this.stableTimer); clearTimeout(this.startTimer); clearTimeout(this.stopTimer); clearTimeout(this.limitTimer); clearTimeout(this.restartTimer);
         this.releaseAudio(); this.detachRecognition();
         this.settle?.({ text: "", canceled: true }); this.settle = null;
     }

@@ -4,7 +4,7 @@ __fluffyModules["bubble-copy.js"] = (() => {
     const COPY = Object.freeze({
         home: "把今天的小事\n慢慢讲给我听",
         listening: "你慢慢地讲呀\n我在认真听呢",
-        thinking: "让我想一想\n马上就写好",
+        thinking: "我在整理你的话\n填好就给你看看",
         ready: "已经填好啦\n你再看一看",
         canceled: "先停在这里\n内容还留着",
         permission: "先允许麦克风\n再说给小猫听",
@@ -41,6 +41,8 @@ __fluffyModules["bubble-copy.js"] = (() => {
     function prepare(text, error = false, context = {}) {
         const original = String(text?.message ?? text ?? "").trim(), key = ALIASES[original] || original;
         const locale = __fluffyModules["entry-i18n.js"], F = __fluffyModules["cat-feedback.js"];
+        if (context.question && __fluffyModules["journal-guidance.js"]?.fields(context.category).some(f => f.key === context.question.field))
+            return {text:context.question.question, detail:""};
         if (error || context.field) return { text: F.say(text, context), detail: "" };
         if (COPY[key]) return { text: locale?.language() === "en" ? locale.bubble(key, COPY[key]) : COPY[key], detail: "" };
         const lines = original.split("\n");
@@ -79,8 +81,9 @@ __fluffyModules["bubble-copy.js"] = (() => {
             }
         }
         const pages = [...new Set(content)].flatMap(value => {
-            const lines = value.split("\n");
-            return measure && width > 10 && lines.some(line => measure(line) > width) ? Talk.pages(value, measure, width) : [lines];
+            const lines = value.split("\n"), lang = __fluffyModules["entry-i18n.js"]?.language() || "zh";
+            const over = lines.length > 2 || lines.some(line => measure && measure(line) > width) || lang === "zh" && [...value.replace(/\s/g, "")].length > 16;
+            return Talk && over ? Talk.pages(value, measure || (t => [...t].length * 13), width > 10 ? width : 116, lang) : [lines];
         });
         const player = { timer: null, index: 0, pages };
         players.set(node, player);

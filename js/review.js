@@ -4,7 +4,7 @@ __fluffyModules["review.js"] = (() => {
     const Layout = __fluffyModules["review-layout.js"], Feedback = __fluffyModules["cat-feedback.js"], Policy = __fluffyModules["ai-policy.js"];
     const Memory = __fluffyModules["chat-memory.js"], ChatText = __fluffyModules["chat-text.js"];
     const Data = __fluffyModules["review-data.js"], Talk = __fluffyModules["review-conversation.js"], Store = __fluffyModules["journal-store.js"];
-    const { HoldGesture } = __fluffyModules["gesture.js"], { AudioSession } = __fluffyModules["audio-session.js"], { SpeechSession } = __fluffyModules["speech.js"];
+    const { HoldGesture } = __fluffyModules["gesture.js"], { SpeechSession } = __fluffyModules["speech.js"];
     /**
      * 输入：元素ID。
      * 输出：DOM节点或null。

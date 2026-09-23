@@ -2,6 +2,13 @@
 __fluffyModules["cat-feedback.js"] = (() => {
     "use strict";
     const COPY = Object.freeze({
+        "dictation-tail": ["我在收好最后一句\n很快就帮你整理", "I'm catching the last bit.\nThen I'll tidy it up."],
+        "entry-organizing": ["我在整理你的话\n填好就给你看看", "I'm tidying your words.\nYou'll have a draft soon."],
+        "entry-paused": ["刚才先停下啦\n点我接着整理", "We paused for a moment.\nTap me to continue."],
+        "entry-held": ["刚才先停下啦\n填过的内容还在", "We've paused.\nYour fields are safe."],
+        "entry-partial": ["这些先帮你记下\n再补一点就好啦", "I've kept these details.\nAdd the rest in your time."],
+        "entry-repair": ["这次没记对呀\n我们一起改好", "I didn't get that right.\nLet's fix it together."],
+        "entry-no-question": ["好呀我先不问啦\n想说时我都在", "I won't ask more.\nI'm here when you need me."],
         "chat-partial": ["后面那句断开了\n你可以接着说呀", "The last bit stopped.\nYou can keep talking."],
         "photo-food-unclear": ["这张没看清食物\n换张照片给我吧", "I can't see the food.\nTry another photo."],
         "photo-food-partial": ["食物先记下来啦\n再添一点份量吧", "I've noted the food.\nAdd a little portion detail."],

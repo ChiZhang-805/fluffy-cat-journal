@@ -5,7 +5,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ['chat-stream.js','chat-text.js','chat-memory.js','deepseek.js','review-conversation.js','review.js','cat-feedback.js']
+FILES = ['journal-guidance.js','companion-policy.js','workflow-trace.js','continue-gate.js','ai-journal.js','app.js','speech.js','deepseek.js','display-language.js','bubble-copy.js','cat-feedback.js','review-conversation.js','animation.js','review.js']
 DECL = re.compile(r'^([ \t]*)(?:(?:async|static|get|set)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)\s*\([^\n]*\)\s*\{', re.M)
 EXCLUDED = {'if','for','while','switch','catch','with'}
 
@@ -32,8 +32,8 @@ def audit():
 
 if __name__=='__main__':
     items=audit()
-    payload={'scope':'Named declarations and class methods in v15 modified chat modules; inline callbacks excluded','count':len(items),'results':items}
-    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT.parent/'verification/comment-v15-audit.json'
+    payload={'scope':'Named declarations and class methods in v16 modified workflow modules; inline callbacks excluded','count':len(items),'results':items}
+    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT.parent/'verification/comment-v16-audit.json'
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
     failures=[item for item in items if not item['passed']]

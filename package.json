@@ -1,13 +1,13 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "15.0.0",
+  "version": "16.0.0",
   "private": true,
-  "description": "Interruptible multi-turn recap chat, incremental plain-text replies and delivered-only conversation memory",
+  "description": "Field-aware AI drafts, considerate companion dialogue, lifecycle recovery and two-second notebook continue",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:browser": "python tests/chat_v15_browser.py",
+    "test:browser": "python tests/refinement_v16_browser.py",
     "evaluate:emotion": "node tools/evaluate-emotion.cjs",
-    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v15.html",
+    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v16.html",
     "test:recap": "node --test tests/review.test.cjs",
     "test:v9": "node --test tests/entry-action.test.cjs && python tests/interaction_v9_browser_test.py",
     "test:v10": "node --test tests/entry-action.test.cjs tests/review-layout.test.cjs && python tests/refinement_v10_browser_test.py",
@@ -15,7 +15,9 @@
     "test:v12": "node --test tests/v12-ai.test.cjs && python tests/v12-browser.py",
     "test:v13": "node --test tests/photo-v13.test.cjs && python tests/v13-browser.py",
     "test:v14": "node --test tests/notebook-v14.test.cjs && python tests/notebook_v14_browser.py",
-    "test:v15": "node --test tests/chat-v15.test.cjs && python tests/chat_v15_browser.py"
+    "test:v15": "node --test tests/chat-v15.test.cjs && python tests/chat_v15_browser.py",
+    "test:v16": "node --test tests/refinement-v16.test.cjs && python tests/refinement_v16_browser.py",
+    "evaluate:ai": "node tools/evaluate-ai.cjs"
   },
   "engines": {
     "node": ">=20"

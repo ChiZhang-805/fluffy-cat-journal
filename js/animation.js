@@ -434,7 +434,7 @@ __fluffyModules["animation.js"] = (() => {
             $("primary").hidden = entry;
             $("confirm-entry").hidden = !entry;
             $("primary").classList.toggle("white", hero);
-            $("primary").disabled = hero ? this.time < 5.8 / HERO_SPEED : record ? this.time < this.writeEnd : false;
+            $("primary").disabled = hero ? this.time < 5.8 / HERO_SPEED : record ? this.time < 2 : false;
             $("primary-label").textContent = hero ? "Continue" : this.saved ? "再记一条" : this.time >= this.writeEnd + 8.4 ? "完成" : "保存记录";
             $("hero-quote").style.opacity = M.range(this.time, 1.5, 2.5);
             $("hero-subtitle").style.opacity = M.range(this.time, .8, 1.5);
