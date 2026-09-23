@@ -131,6 +131,58 @@ __fluffyModules["deepseek.js"] = (() => {
             }
         }
         /**
+         * 输入：payload（文字聊天请求）、signal、onDelta（正文回调）、options（剩余总时限）。
+         * 输出：Promise<{text, finishReason}>。
+         * 功能：独立的陪伴流式通道；不影响原有结构化记录请求，不自行无限重试。
+         */
+        async streamText(payload, signal, onDelta, options = {}) {
+            const P = __fluffyModules["ai-policy.js"], Stream = __fluffyModules["chat-stream.js"];
+            P.throwIfAborted(signal);
+            if (!this.configured) throw new P.AIError("deepseek-key", "DeepSeek key required");
+            const version = this.keyVersion, key = this.#key, controller = new AbortController();
+            let timedOut = false;
+            /** 输入：无。输出：无。功能：将旧轮取消传给 fetch 和 SSE 读取。 */
+            const cancel = () => controller.abort();
+            signal?.addEventListener("abort", cancel, { once: true });
+            const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.max(1, Math.min(this.requestTimeoutMs, options.timeoutMs ?? this.requestTimeoutMs)));
+            try {
+                // 阶段一：仅使用当前 DeepSeek Key；强制正文流，移除聊天不需要的 JSON 契约。
+                const body = { ...payload, model: this.model, stream: true, thinking: { type: "disabled" } };
+                delete body.response_format;
+                const response = await this.fetch(this.routes.chat, {
+                    method: "POST", redirect: "error", mode: "cors", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
+                    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+                    body: JSON.stringify(body), signal: controller.signal
+                });
+                P.throwIfAborted(controller.signal);
+                if (!response.ok) {
+                    const code = ({400:"ai-parameter",401:"auth-deepseek",402:"ai-balance",403:"ai-permission",404:"ai-model",422:"ai-parameter",429:"ai-busy",500:"ai-busy",502:"ai-busy",503:"ai-busy",504:"ai-timeout"})[response.status] || "ai-network";
+                    const error = new P.AIError(code, apiError(response.status), { provider: "deepseek", status: response.status });
+                    const header = response.headers?.get?.("Retry-After");
+                    error.retryAfterMs = header ? (/^\d+(?:\.\d+)?$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now()) : 500;
+                    try { await response.body?.cancel(); } catch { /* 不保存服务商错误正文。 */ }
+                    throw error;
+                }
+                // 阶段二：每次正文回调和结束都检查代次，换 Key 后旧流不能继续显示。
+                const result = await Stream.read(response, controller.signal, delta => {
+                    P.throwIfAborted(controller.signal);
+                    if (version !== this.keyVersion) { controller.abort(); throw new DOMException("Canceled", "AbortError"); }
+                    onDelta?.(delta);
+                });
+                if (version !== this.keyVersion) throw new DOMException("Canceled", "AbortError");
+                P.throwIfAborted(controller.signal);
+                return result;
+            } catch (error) {
+                if (timedOut) throw new P.AIError("ai-timeout", "Chat stream timed out");
+                if (controller.signal.aborted) throw new DOMException("Canceled", "AbortError");
+                if (error.code) throw error;
+                throw new P.AIError(error instanceof TypeError ? "ai-network" : "ai-format", "Chat transport failed");
+            } finally {
+                clearTimeout(timeout);
+                signal?.removeEventListener("abort", cancel);
+            }
+        }
+        /**
          * 输入：signal（取消信号，可选）。
          * 输出：可用模型名称数组。
          * 功能：读取模型列表验证 Key；不生成聊天内容，不宣称语音识别已经接通。

@@ -58,3 +58,6 @@
 @keyframes review-bar-grow{to{transform:scaleY(1)}}@keyframes review-fade{from{opacity:0}to{opacity:1}}@keyframes review-menu-in{from{opacity:0;transform:translateY(4px) scale(.98)}to{opacity:1;transform:none}}
 .reduce-motion .review-page *{animation:none!important;transition:none!important}.reduce-motion .review-bar-paint{transform:none}
 @media(prefers-reduced-motion:reduce){.review-page *{animation:none!important;transition:none!important}.review-bar-paint{transform:none}}
+
+/* v15：按下即有反馈；只有真正长按才切换收音，页面和图表始终不移动。 */
+.review-chat[data-pressing="true"]{filter:brightness(.96);box-shadow:0 0 0 4px #74c98623}

@@ -5,7 +5,7 @@ function fixture() {
  const storage=new Map(), ctx=vm.createContext({Date,Intl,Math,Map,Set,Object,Number,String,Array,JSON,Error,TypeError,Promise,AbortController,DOMException,URL,setTimeout,clearTimeout,console,
  localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,String(v))}});
  vm.runInContext('const __fluffyModules={};',ctx);
- for(const name of ['model','sleep-time','catalog','journal-store','review-data','review-conversation']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/'+name+'.js'),'utf8'),ctx);
+ for(const name of ['ai-policy','model','sleep-time','catalog','journal-store','review-data','chat-text','review-conversation']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/'+name+'.js'),'utf8'),ctx);
  return {get:n=>vm.runInContext(`__fluffyModules['${n}.js']`,ctx),storage};
 }
 const f=fixture(),D=f.get('review-data'),T=f.get('review-conversation');

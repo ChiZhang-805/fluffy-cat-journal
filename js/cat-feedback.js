@@ -2,6 +2,7 @@
 __fluffyModules["cat-feedback.js"] = (() => {
     "use strict";
     const COPY = Object.freeze({
+        "chat-partial": ["后面那句断开了\n你可以接着说呀", "The last bit stopped.\nYou can keep talking."],
         "photo-food-unclear": ["这张没看清食物\n换张照片给我吧", "I can't see the food.\nTry another photo."],
         "photo-food-partial": ["食物先记下来啦\n再添一点份量吧", "I've noted the food.\nAdd a little portion detail."],
         "photo-filled": ["这餐替你填好啦\n看看要不要修改", "Your meal is filled in.\nChange anything you like."],

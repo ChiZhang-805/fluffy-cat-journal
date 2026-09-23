@@ -5,7 +5,7 @@ function setup() {
  const store = new Map();
  const c = vm.createContext({ Date, Intl, Math, Map, Set, WeakMap, Object, Array, Number, String, JSON, Error, TypeError, Promise, AbortController, DOMException, URL, TextEncoder, TextDecoder, Uint8Array, Response, performance, console, setTimeout, clearTimeout, requestAnimationFrame:()=>1, cancelAnimationFrame:()=>{}, localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)}, fetch:async()=>{throw Error('Unexpected real request');} });
  vm.runInContext('const __fluffyModules={};',c);
- for(const f of ['ai-policy','cat-feedback','model','sleep-time','catalog','journal-store','entry-i18n','deepseek','bailian','ai-journal','review-data','review-conversation','display-language','record-intent','speech','bubble-copy']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',f+'.js'),'utf8'),c,{filename:f+'.js'});
+ for(const f of ['ai-policy','cat-feedback','model','sleep-time','catalog','journal-store','entry-i18n','chat-stream','deepseek','bailian','ai-journal','review-data','chat-text','review-conversation','display-language','record-intent','speech','bubble-copy']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',f+'.js'),'utf8'),c,{filename:f+'.js'});
  return {c,get:n=>vm.runInContext(`__fluffyModules[${JSON.stringify(n+'.js')}]`,c)};
 }
 /** 输入：对象/终止原因。输出：协议结果。功能：生成不含真实用户数据的模型返回替身。 */

@@ -2,6 +2,7 @@
 __fluffyModules["review.js"] = (() => {
     "use strict";
     const Layout = __fluffyModules["review-layout.js"], Feedback = __fluffyModules["cat-feedback.js"], Policy = __fluffyModules["ai-policy.js"];
+    const Memory = __fluffyModules["chat-memory.js"], ChatText = __fluffyModules["chat-text.js"];
     const Data = __fluffyModules["review-data.js"], Talk = __fluffyModules["review-conversation.js"], Store = __fluffyModules["journal-store.js"];
     const { HoldGesture } = __fluffyModules["gesture.js"], { AudioSession } = __fluffyModules["audio-session.js"], { SpeechSession } = __fluffyModules["speech.js"];
     /**
@@ -47,7 +48,12 @@ __fluffyModules["review.js"] = (() => {
             this.serial = 0;
             this.controller = null;
             this.lang = Store.read("fluffy-review-language-v1", "zh") === "en" ? "en" : "zh";
-            this.sessions = new Map();
+            this.memories = new Map();
+            this.turn = null;
+            this.intentController = null;
+            this.diagnostics = new Memory.Diagnostics();
+            // 仅公开脱敏统计方法，诊断对象中没有用户原话、Key 或历史记录。
+            window.FluffyChatDiagnostics = Object.freeze({ snapshot: () => this.diagnostics.snapshot(), clear: () => this.diagnostics.clear() });
             this.textDrafts = new Map();
             this.pendingMessage = null;
             this.retryPending = false;
@@ -83,10 +89,10 @@ __fluffyModules["review.js"] = (() => {
             $("review-more").onclick = () => this.toggleMenu();
             $("review-pet").onclick = () => { this.h.animation.petAt = this.h.animation.idle; };
             $("review-bubble").onclick = () => {
-                if (this.retryPending && this.pendingMessage && this.pendingMessage.key === this.sessionKey && !["thinking", "listening", "requesting", "authorizing"].includes(this.phase)) {
+                if (this.retryPending && this.pendingMessage && this.pendingMessage.key === this.sessionKey && !["thinking", "listening", "requesting", "authorizing", "settling"].includes(this.phase)) {
                     const pending = this.pendingMessage;
                     this.retryPending = false;
-                    this.send(pending.text);
+                    this.send(pending.text, null, false, { retryId: pending.turnId });
                     return;
                 }
                 if (this.queue.length) {
@@ -94,6 +100,12 @@ __fluffyModules["review.js"] = (() => {
                     $("review-bubble").dataset.paused = String(this.paused);
                 }
             };
+            // 按下立即给反馈并暂停读秒；达到420ms才真正打断旧轮，轻触不误开启麦克风。
+            $("review-chat").addEventListener("pointerdown", event => { if (event.button === 0 && event.isPrimary && !$("review-chat").disabled) this.pressFeedback(true); });
+            $("review-chat").addEventListener("keydown", event => { if (event.code === "Space" && !event.repeat) this.pressFeedback(true); });
+            window.addEventListener("pointerup", () => this.pressFeedback(false));
+            window.addEventListener("pointercancel", () => this.pressFeedback(false));
+            $("review-chat").addEventListener("keyup", event => { if (event.code === "Space") this.pressFeedback(false); });
             document.addEventListener("pointerdown", e => {
                 if (!$("review-menu").contains(e.target) && !$("review-more").contains(e.target))
                     this.closeMenu(false);
@@ -103,6 +115,7 @@ __fluffyModules["review.js"] = (() => {
             document.addEventListener("visibilitychange", () => {
                 if (document.hidden && this.phase !== "authorizing" && this.phase !== "speaking")
                     this.cancel(false);
+                if (document.hidden) this.pressFeedback(false);
                 this.lastTick = 0;
             });
         }
@@ -130,11 +143,9 @@ __fluffyModules["review.js"] = (() => {
             this.lang = __fluffyModules["entry-i18n.js"]?.language() || this.lang;
             this.view = Data.build(id, date || (typeof record === "object" ? Data.dateOf(record) : Store.dayKey()));
             this.sessionKey = `${id}:${this.view.date}`;
-            if (!this.sessions.has(this.sessionKey))
-                this.sessions.set(this.sessionKey, []);
-            // 内存会话有界；其他日期/板块的内容不会进入当前模型请求。
-            if (this.sessions.size > 18)
-                this.sessions.delete(this.sessions.keys().next().value);
+            if (!this.memories.has(this.sessionKey)) this.memories.set(this.sessionKey, new Memory.ConversationMemory());
+            // 会话按日期/板块隔离，最多保留18组；原话不进入localStorage或诊断日志。
+            if (this.memories.size > 18) this.memories.delete(this.memories.keys().next().value);
             this.h.Display.warm(this.view.records);
             this.render();
             this.phase = "idle";
@@ -153,7 +164,14 @@ __fluffyModules["review.js"] = (() => {
          * 输出：当前板块日期的对话数组。
          * 功能：只保留实际成功的交流。
          */
-        history() { return this.sessions.get(this.sessionKey) || []; }
+        history() { return this.memory().messages(); }
+        /** 输入：无。输出：当前会话账本。功能：切换日期/板块时使用不同上下文，不混入其他记录。 */
+        memory() {
+            if (!this.memories.has(this.sessionKey)) this.memories.set(this.sessionKey, new Memory.ConversationMemory());
+            return this.memories.get(this.sessionKey);
+        }
+        /** 输入：按压状态。输出：无。功能：轻触即时反馈，长按阈值前暂停气泡计时但不取消回答。 */
+        pressFeedback(active) { this.pressActive = active; $("review-chat").dataset.pressing = String(active); }
         /**
          * 输入：无。
          * 输出：无。
@@ -169,24 +187,20 @@ __fluffyModules["review.js"] = (() => {
             this.phase = phase;
             $("review-chat").dataset.phase = phase;
             $("review-chat-wave").hidden = phase !== "listening";
-            $("review-chat-label").textContent = phase === "authorizing" ? this.t("等待麦克风", "Allow microphone") : phase === "thinking" ? this.t("小猫想一想…", "Let me think…") : phase === "requesting" ? this.t("准备听你说", "Getting ready…") : this.t("长按和小猫聊两句", "Hold to talk with me");
+            $("review-chat-label").textContent = phase === "authorizing" ? this.t("等待麦克风", "Allow microphone") : phase === "settling" ? this.t("听好最后一句", "Finishing dictation…") : phase === "thinking" ? this.t("小猫想一想…", "Let me think…") : phase === "requesting" ? this.t("准备听你说", "Getting ready…") : this.t("长按和小猫聊两句", "Hold to talk with me");
             $("review-chat").disabled = phase === "authorizing";
-            this.h.animation.reviewMode = phase === "listening" ? "listen" : phase === "thinking" ? "think" : phase === "speaking" ? "talk" : "rest";
+            this.h.animation.reviewMode = phase === "listening" ? "listen" : ["thinking", "settling"].includes(phase) ? "think" : phase === "speaking" ? "talk" : "rest";
             this.h.animation.reviewGesture = this.currentGesture || "soft";
         }
         /**
          * 输入：无。
          * 输出：无。
-         * 功能：按钮短按不触发录入/庆祝；思考时可取消。
+         * 功能：短按只提示手势，不取消仍在回复的轮次；长按才打断并开始新输入。
          */
         short() {
-            if (!this.active)
-                return;
-            if (this.phase === "thinking") {
-                this.cancel(true);
-                return;
-            }
-            this.status(this.t("按住说话，松开就好", "Hold to speak, release when done"));
+            if (!this.active) return;
+            // 短按不终止仍在生成/展示的回答，避免本来想长按却误丢整轮。
+            if (!this.turn?.generating && !this.queue.length && this.phase === "idle") this.status("hold");
         }
         /**
          * 输入：text。
@@ -214,24 +228,27 @@ __fluffyModules["review.js"] = (() => {
          * 输出：无。
          * 功能：所有退出与取消共用幂等清理，迟到音频/回复不能重启。
          */
-        cancel(announce = false) {
+        cancel(announce = false, preserveHold = false) {
+            const current = this.turn;
             this.serial++;
-            this.controller?.abort();
-            this.controller = null;
-            this.raw?.cancel();
-            this.speech?.cancel();
-            this.hold?.disarm();
-            this.queue = [];
-            this.paused = false;
-            this.level = 0;
-            this.wave = Array(72).fill(0);
+            if (current && ["pending", "playing"].includes(current.record.status)) {
+                current.memory.finish(current.record, "interrupted");
+                this.diagnostics.add(current.id, "interrupted", { page: current.record.presented.length });
+            }
+            this.turn = null;
+            this.controller?.abort(); this.controller = null;
+            this.intentController?.abort(); this.intentController = null;
+            this.raw?.cancel(); this.speech?.cancel();
+            if (!preserveHold) { this.hold?.disarm(); this.pressFeedback(false); }
+            this.queue = []; this.queueIndex = -1; this.paused = false;
+            this.level = 0; this.wave = Array(72).fill(0);
+            this.pendingIntent = null; this.renderIntentButton();
             if ($("review-chat")) {
                 this.setPhase("idle");
                 $("review-bubble").classList.remove("fading");
                 $("review-bubble").dataset.paused = "false";
             }
-            if (announce && this.active)
-                this.status(this.t("停下来也没关系", "We can pause here"));
+            if (announce && this.active) this.status("canceled");
         }
         /**
          * 输入：无。
@@ -243,13 +260,8 @@ __fluffyModules["review.js"] = (() => {
                 return;
             const pressed = this.hold.pressed;
             // 清理上一句回复，但保留本次手势；取消计时与模型不触发新短按。
-            this.serial++;
-            this.controller?.abort();
-            this.controller = null;
-            this.raw.cancel();
-            this.speech.cancel();
-            this.queue = [];
-            this.paused = false;
+            this.cancel(false, true);
+            this.diagnostics.add(this.serial, "begin");
             if (!pressed)
                 return;
             if (!this.h.api.configured) {
@@ -307,6 +319,7 @@ __fluffyModules["review.js"] = (() => {
         started() {
             if (this.active && this.phase === "requesting") {
                 this.setPhase("listening");
+                this.diagnostics.add(this.serial, "listening");
                 this.showLines([this.t("你慢慢说呀", "Take your time."), this.t("我在认真听呢", "I'm listening.")]);
             }
         }
@@ -325,7 +338,7 @@ __fluffyModules["review.js"] = (() => {
             if (!this.active || this.phase !== "listening")
                 return;
             const serial = this.serial;
-            this.setPhase("thinking");
+            this.setPhase("settling");
             this.showLines([this.t("让我想一想", "Let me think."), this.t("再慢慢说给你听", "I'm right here.")]);
             let result;
             try {
@@ -334,6 +347,7 @@ __fluffyModules["review.js"] = (() => {
                 if (serial !== this.serial || !this.active || result.canceled)
                     return;
                 if (!result.text?.trim()) throw new Policy.AIError("speech-empty", "没有收到听写原文。");
+                this.diagnostics.add(serial, "recognized", { characters: result.text.length });
                 await this.send(result.text, null, false);
             }
             catch (e) {
@@ -348,62 +362,96 @@ __fluffyModules["review.js"] = (() => {
         /**
          * 输入：text、audio、opening。
          * 输出：Promise<void>。
-         * 功能：以回顾快照和本轮上下文请求真实回复，成功才加入会话。
+         * 功能：用户原话先入内存；正文流逐句入队，只有已展示的回答才加入后续上下文。
          */
-        async send(text, audio = null, opening = false) {
-            if (!opening && this.phase === "thinking" && this.controller) return;
-            const serial = ++this.serial, key = this.sessionKey, controller = new AbortController();
+        async send(text, audio = null, opening = false, options = {}) {
+            if (!this.active) return;
+            // 阶段一：新轮拥有独立取消源。重试复用逻辑消息ID，普通再次发言一定是新轮。
+            this.cancel(false);
+            const serial = this.serial, key = this.sessionKey, memory = this.memory();
+            const record = memory.begin(String(text || ""), opening, options.retryId);
+            const controller = new AbortController();
+            const current = { id: serial, key, memory, record, controller, generating: true, opening };
+            this.turn = current; this.controller = controller;
             if (!opening) {
-                this.pendingMessage = { text: String(text || ""), key };
-                this.retryPending = false;
+                this.pendingMessage = { text: String(text || ""), key, turnId: record.id };
                 this.textDrafts.set(key, String(text || ""));
+                while (this.textDrafts.size > 18) this.textDrafts.delete(this.textDrafts.keys().next().value);
             }
-            this.controller?.abort();
-            this.controller = controller;
-            if (!opening) {
-                this.queue = [];
-                this.setPhase("thinking");
-                this.showLines([this.t("让我想一想", "Let me think."), this.t("再慢慢说给你听", "I'm right here.")]);
-            }
+            this.retryPending = false;
+            this.queue = []; this.queueIndex = -1; this.queueElapsed = 0;
+            this.setPhase("thinking");
+            this.showLines([this.t("让我想一想", "Let me think."), this.t("我会接着听你说", "I'm right here.")]);
+            const b = $("review-bubble"), style = getComputedStyle(b);
+            this.measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            const width = b.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 4;
             try {
-                const answer = await Talk.request({ api: this.h.api, bailian: this.h.bailian, view: this.view, history: this.history(), text, audio, lang: this.lang, opening, signal: controller.signal });
-                if (serial !== this.serial || key !== this.sessionKey || !this.active || controller.signal.aborted)
-                    return;
+                // 阶段二：传输增量先分成完整短句，短句到达即可排队；不得等全部生成才开始说。
+                await Talk.request({ api: this.h.api, view: this.view, memory: memory.context(record.id), text, audio, lang: this.lang, opening, signal: controller.signal,
+                    width, measure: value => this.measure.measureText(value).width + ChatText.count(value) * .27,
+                    onPage: page => { if (this.isCurrent(current)) this.appendPage(page, current); },
+                    onEvent: (event, meta) => { if (this.isCurrent(current)) this.diagnostics.add(serial, event, meta); }
+                });
+                if (!this.isCurrent(current)) return;
+                current.generating = false;
+                if (record.status === "pending") memory.finish(record, "playing");
                 this.retryPending = false;
                 if (!opening) { this.pendingMessage = null; this.textDrafts.delete(key); }
-                const history = this.history();
-                if (!opening)
-                    history.push({ role: "user", content: audio ? answer.transcript : text });
-                history.push({ role: "assistant", content: answer.replies.map(r => r.text).join("\n") });
-                this.sessions.set(key, history.slice(-12));
-                this.enqueue(answer.replies);
-                if (!opening) {
-                    const words = audio ? answer.transcript : text, Intent = __fluffyModules["record-intent.js"];
-                    const proposal = await Intent.infer(words, { category: this.view.id, date: this.view.date }, this.h.api, controller.signal);
-                    if (serial !== this.serial || !this.active || key !== this.sessionKey)
-                        return;
-                    this.pendingIntent = proposal.operation !== "none" ? { words, proposal } : null;
-                    this.buildMenu();
-                    // 记事按钮表示可确认的操作，不打断小猫已经开始的对话。
-                    this.renderIntentButton();
+                this.diagnostics.add(serial, "complete", { page: this.queue.length });
+                // 阶段三：记事意图是可选辅助任务，使用独立取消源，失败不能覆盖已经成功的回答。
+                if (!opening) this.inferIntent(current, text);
+            } catch (error) {
+                if (!this.isCurrent(current)) return;
+                if (error.name === "AbortError") { this.cancel(false); return; }
+                current.generating = false; memory.finish(record, "failed");
+                this.diagnostics.add(serial, "failed", { code: error.code, status: error.status || 0, page: record.presented.length });
+                const hasPages = this.queue.some(item => item.turn === current) || record.presented.length > 0;
+                if (hasPages) {
+                    // 已有完整句保留，不整段重放；不完整的网络尾句已经被分句器丢弃。
+                    this.pendingMessage = null; this.retryPending = false; this.textDrafts.delete(key);
+                    for (const lines of Talk.pages(Feedback.say("chat-partial", {language:this.lang}), t => this.measure.measureText(t).width + ChatText.count(t)*.27, width, this.lang)) this.queue.push({lines,gesture:"soft",turn:null});
+                    this.setPhase("speaking");
+                } else {
+                    this.retryPending = !opening;
+                    this.fail(error);
                 }
-            }
-            catch (e) {
-                if (serial !== this.serial || e.name === "AbortError" || !this.active)
-                    return;
-                this.controller = null;
-                if (opening)
-                    this.notify(e);
-                else {
-                    this.retryPending = true;
-                    this.fail(e);
-                }
-            }
-            finally {
-                if (this.controller === controller)
-                    this.controller = null;
+            } finally {
+                if (this.controller === controller) this.controller = null;
                 audio = null;
             }
+        }
+        /** 输入：current（请求轮次）。输出：boolean。功能：所有迟到回调统一检查，旧轮不得更新新轮界面。 */
+        isCurrent(current) { return this.active && this.turn === current && current.id === this.serial && current.key === this.sessionKey && !current.controller.signal.aborted; }
+        /**
+         * 输入：page（完整短句页）、current（所属轮次）。
+         * 输出：无。
+         * 功能：排队不等于已经说过；真正显示时才提交对话上下文。
+         */
+        appendPage(page, current) {
+            if (!this.isCurrent(current)) return;
+            this.queue.push({ ...page, turn: current, presented: false });
+            if (this.queueIndex < 0) { this.queueIndex = 0; this.queueElapsed = 0; this.displayCurrent(); }
+            this.setPhase("speaking");
+        }
+        /**
+         * 输入：current、words。
+         * 输出：Promise<void>。
+         * 功能：新增/修改意图旁路判断，只提出用户确认入口；不影响回复状态，不写记录。
+         */
+        async inferIntent(current, words) {
+            // 普通的“不是时间不够，是有点累”属于聊天，不因为包含“不是…是”就提出改记录。
+            const writeCue = /记错|写错|填错|记下|记录|补记|新增|修改|更正|纠正|改成|改为|保存|再记|又.{0,12}(?:跑|练|吃|睡|专注)|\b(?:log|record|save|edit|correct|new entry|change .{0,24} to)\b/i;
+            if (!writeCue.test(words)) return;
+            const Intent = __fluffyModules["record-intent.js"], controller = new AbortController();
+            this.intentController?.abort(); this.intentController = controller;
+            try {
+                const proposal = await Intent.infer(words, {category:this.view.id,date:this.view.date}, this.h.api, controller.signal);
+                if (!this.isCurrent(current) || controller.signal.aborted) return;
+                this.pendingIntent = proposal.operation !== "none" ? { words, proposal } : null;
+                this.buildMenu(); this.renderIntentButton();
+            } catch (error) {
+                if (this.isCurrent(current) && error.name !== "AbortError") this.diagnostics.add(current.id,"intent-failed",{code:error.code});
+            } finally { if (this.intentController === controller) this.intentController = null; }
         }
         /**
          * 输入：无。
@@ -463,6 +511,7 @@ __fluffyModules["review.js"] = (() => {
          * 功能：诚实提示失败，不用预置回复冒充成功。
          */
         fail(message) {
+            this.diagnostics.add(this.serial, "failed", {code:message?.code});
             this.cancel(false);
             if (!this.active)
                 return;
@@ -480,7 +529,7 @@ __fluffyModules["review.js"] = (() => {
             const b = $("review-bubble"), style = getComputedStyle(b);
             this.measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
             const width = b.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 4;
-            this.queue = replies.flatMap(r => Talk.pages(r.text, text => this.measure.measureText(text).width + [...text].length * .27, width).map(lines => ({ lines, gesture: r.gesture })));
+            this.queue = replies.flatMap(r => Talk.pages(r.text, text => this.measure.measureText(text).width + ChatText.count(text) * .27, width, this.lang).map(lines => ({ lines, gesture: r.gesture, turn: null, presented: false })));
             this.queueIndex = 0;
             this.queueElapsed = 0;
             this.paused = false;
@@ -496,20 +545,27 @@ __fluffyModules["review.js"] = (() => {
          */
         displayCurrent() {
             const item = this.queue[this.queueIndex];
-            if (!item)
-                return;
+            if (!item || document.hidden || !$("sheet-layer").hidden) return;
             this.currentGesture = item.gesture;
             this.h.animation.reviewGesture = item.gesture;
             this.showLines(item.lines);
-            this.h.animation.reviewPhraseAt = this.h.animation.idle;
-            this.queueDuration = Math.max(3300, Math.min(6800, item.lines.join("").length * (this.lang === "en" ? 75 : 165) + 1100));
+            if (!item.presented) {
+                item.presented = true;
+                if (item.turn && this.isCurrent(item.turn)) {
+                    item.turn.memory.present(item.turn.record, item.index, item.text || item.lines.join(""));
+                    this.diagnostics.add(item.turn.id, item.turn.record.presented.length === 1 ? "first-page" : "page", { page: item.index, characters: ChatText.count(item.lines.join("")) });
+                }
+                this.h.animation.reviewPhraseAt = this.h.animation.idle;
+            }
+            const length = ChatText.count(item.lines.join(""));
+            this.queueDuration = Math.max(2500, Math.min(4200, length * (this.lang === "en" ? 52 : 130) + 1350));
         }
         /**
          * 输入：一至两行纯文本。
          * 输出：无。
          * 功能：不把长回复挤成三行，保留圆润气泡。
          */
-        showLines(lines) { const b = $("review-bubble"); b.textContent = lines.join("\n"); b.classList.remove("fading"); b.dataset.paused = String(this.paused || false); }
+        showLines(lines) { const b = $("review-bubble"); b.textContent = lines.join("\n"); b.classList.remove("fading"); b.dataset.paused = String(this.paused || false); b.dataset.feedback = ""; }
         /**
          * 输入：无。
          * 输出：无。
@@ -528,7 +584,8 @@ __fluffyModules["review.js"] = (() => {
             }
             if (this.phase === "listening")
                 this.drawWave(now);
-            if (this.phase === "speaking" && this.queue.length && !document.hidden && !this.paused && $("sheet-layer").hidden) {
+            if (this.phase === "speaking" && this.queue.length && !document.hidden && !this.paused && !this.pressActive && $("sheet-layer").hidden) {
+                if (!this.queue[this.queueIndex]?.presented) this.displayCurrent();
                 this.queueElapsed += dt;
                 if (this.queueElapsed >= this.queueDuration) {
                     if (this.queueIndex < this.queue.length - 1) {
@@ -539,8 +596,9 @@ __fluffyModules["review.js"] = (() => {
                             this.displayCurrent();
                         }
                     }
-                    else {
-                        this.queue = [];
+                    else if (!this.turn?.generating) {
+                        if (this.turn && ["pending", "playing"].includes(this.turn.record.status)) this.turn.memory.finish(this.turn.record, "complete");
+                        this.queue = []; this.queueIndex = -1;
                         this.setPhase("idle");
                     }
                 }
@@ -729,7 +787,7 @@ __fluffyModules["review.js"] = (() => {
                 b.append(node("span", "", this.t(zh, en)));
                 b.onclick = () => {
                     this.closeMenu(false);
-                    if (["requesting", "listening", "thinking"].includes(this.phase))
+                    if (["requesting", "listening", "settling", "thinking"].includes(this.phase))
                         this.cancel(false);
                     action();
                 };
@@ -772,7 +830,7 @@ __fluffyModules["review.js"] = (() => {
                 return;
             if (e.key === "Escape") {
                 this.closeMenu(true);
-                if (["requesting", "listening", "thinking"].includes(this.phase))
+                if (["requesting", "listening", "settling", "thinking"].includes(this.phase))
                     this.cancel(true);
             }
             if (!$("review-menu").hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {

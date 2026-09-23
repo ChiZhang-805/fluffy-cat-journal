@@ -18,7 +18,7 @@ window.fetch=async function(url,opts={}){
  if(!p)return wrap({data:[{id:'deepseek-flash'},{id:'qwen3-vl-plus'}]});
  if(__mode==='late'){return new Promise(r=>window.__resolveLate=()=>r(wrap(model({fields:{activity:'跑步',durationMinutes:30,notes:'五公里'},warnings:[]}))));}
  if(__mode==='empty')return wrap({choices:[{finish_reason:'stop',message:{content:''}}]});
- if(__mode==='bad')return wrap({choices:[{finish_reason:'stop',message:{content:'not JSON'}}]});
+ if(__mode==='bad')return wrap({choices:[{finish_reason:'stop',message:{content:'{bad'}}]});
  if(__mode==='denied')return new Response('sensitive provider response',{status:401});
  if(__mode==='busy')return new Response('',{status:429,headers:{'Retry-After':'60'}});
  if(__mode==='network')throw new TypeError('Failed to fetch');
