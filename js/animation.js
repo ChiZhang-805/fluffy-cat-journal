@@ -1,7 +1,8 @@
 __fluffyModules["animation.js"] = (() => {
-    const { displayRows, circularPositions } = __fluffyModules["model.js"];
+    const { displayRows } = __fluffyModules["model.js"];
     const { makeHandwriting, sampleHandwriting, drawHandwriting } = __fluffyModules["handwriting.js"];
     const M = window.M;
+    const Notebook = __fluffyModules["notebook-layout.js"];
     const ReviewGeometry = __fluffyModules["review-layout.js"].geometry;
     /**
      * 输入：id（DOM标识）。
@@ -15,10 +16,8 @@ __fluffyModules["animation.js"] = (() => {
      * 功能：让同一动画同时支持源码部署和离线HTML。
      */
     const asset = name => window.CAT_ASSETS?.[name] || `assets/${name}`;
-    // 活动项的标题、笔路、横线统一使用这个行原点，循环副本只改变整体位移。
-    const PAPER = Object.freeze({
-        originY: 470, pitch: 90, writingOffset: -22, clipTop: 417, clipBottom: 707, labelOffset: -12
-    });
+    // 几何只有一个来源：手写画布、抬笔送纸、完成后的原生滚动共享同一份布局。
+    const PAPER = Notebook.PAPER;
     const HERO_SPEED = 1 / .85;
     const ANCHORS = [[74, 335, 8, "star"], [316, 332, 7, "star"], [348, 518, 8, "star"], [53, 411, 12, "bar"], [41, 472, 8, "bar"], [41, 548, 11, "bar"], [293, 385, 10, "bar"], [337, 426, 12, "bar"], [212, 322, 9, "bar"], [320, 570, 8, "bar"]];
     /**
@@ -71,6 +70,11 @@ __fluffyModules["animation.js"] = (() => {
             this.thinking = 0;
             this.bridge = false;
             this.heroClock = 0;
+            this.paperScroll = 0;
+            this.notebook = $("record-notebook");
+            this.notebookSpacer = $("notebook-spacer");
+            this.notebook?.addEventListener("scroll", this.readNotebook.bind(this), { passive: true });
+            this.notebook?.addEventListener("keydown", this.notebookKey.bind(this));
             this.metrics = {
                 frame: 0, penDown: false, penTip: [0, 0], inkTip: [0, 0], paperOffset: 0, renderer: "loading"
             };
@@ -105,16 +109,20 @@ __fluffyModules["animation.js"] = (() => {
         setRecord(record) {
             this.record = record;
             this.rows = record.displayRows || displayRows(record);
-            this.lines = this.rows.map(row => makeHandwriting(row.value, 250, 54));
-            let cursor = 2.15;
-            this.schedule = this.lines.map(line => {
-                const duration = M.clamp(line.duration * .83, 2.25, 6.1), slot = { start: cursor, end: cursor + duration };
-                cursor += duration + .95;
-                return slot;
-            });
-            this.writeEnd = this.schedule.at(-1).end;
+            // 阶段一：采用自然纸长，不用字号收缩换取“全部塞在三行里”。
+            this.lines = this.rows.map(row => makeHandwriting(String(row.value ?? "—"), PAPER.inkWidth, Infinity));
+            this.paperLayout = Notebook.createLayout(this.lines);
+            this.paperTimeline = Notebook.createTimeline(this.paperLayout, this.lines);
+            this.schedule = this.paperTimeline.schedule;
+            this.writeEnd = this.paperTimeline.writeEnd;
+            this.paperReturnEnd = this.paperTimeline.returnEnd;
             this.duration = this.writeEnd + 11;
             this.saved = false;
+            // 阶段二：新笔记从头开始；渲染帧不能反复把用户已经滚动的位置重置。
+            this.paperScroll = 0;
+            this.readingPaper = false;
+            if (this.notebook) { this.notebook.hidden = true; this.notebook.scrollTop = 0; }
+            if (this.notebookSpacer) this.notebookSpacer.style.height = `${this.paperLayout.contentHeight}px`;
         }
         /**
          * 输入：无。
@@ -161,24 +169,15 @@ __fluffyModules["animation.js"] = (() => {
          * 功能：完成一项后抬笔再送纸；末尾继续前移一圈，实现无反向跳回的汇总。
          */
         paperOffset(time) {
-            if (time < 2.15)
-                return PAPER.writingOffset * M.range(time, 1.55, 2.15);
-            for (let i = 0; i < 3; i++) {
-                const slot = this.schedule[i], offset = PAPER.writingOffset - PAPER.pitch * i;
-                if (time <= slot.end)
-                    return offset;
-                if (i < 2 && time < this.schedule[i + 1].start)
-                    return M.mix(offset, offset - PAPER.pitch, M.range(time, slot.end + .12, this.schedule[i + 1].start - .12));
-            }
-            return M.mix(PAPER.writingOffset - PAPER.pitch * 2, -PAPER.pitch * 3, M.range(time, this.writeEnd + .25, this.writeEnd + 2.25));
+            return Notebook.paperOffset(this.paperLayout, this.paperTimeline, time);
         }
         /**
-         * 输入：index（逻辑行 0..2）、offset（内页累计偏移）。
+         * 输入：index（逻辑字段索引）、offset（内页累计偏移）。
          * 输出：内容起点 Y 坐标，尚未做循环取模。
          * 功能：标题和笔尖使用同一个坐标系，避免 Notes 只在底部副本出现。
          */
         rowOrigin(index, offset) {
-            return PAPER.originY + PAPER.pitch * index + offset;
+            return PAPER.originY + this.paperLayout.fields[index].top + offset;
         }
         /**
          * 输入：index（记录行）、clock（行内笔画时间）、offset（内页偏移）。
@@ -195,21 +194,29 @@ __fluffyModules["animation.js"] = (() => {
          * 功能：为起笔、书写、换行分别计算连续路径，并在换行时抬笔。
          */
         activeNib(time) {
-            if (time < this.schedule[0].start) {
-                const dest = this.linePoint(0, 0, PAPER.writingOffset).tip;
-                return { tip: M.point([216, 431], dest, M.range(time, 1.45, 2.15)), down: false };
+            const segments = this.paperTimeline.segments, first = segments[0];
+            if (time < first.start) {
+                const dest = this.linePoint(first.index, first.from, first.offset).tip;
+                return { tip: M.point([216, 431], dest, M.range(time, 1.45, first.start)), down: false };
             }
-            for (let i = 0; i < 3; i++) {
-                const slot = this.schedule[i];
-                if (time >= slot.start && time <= slot.end)
-                    return this.linePoint(i, (time - slot.start) / (slot.end - slot.start) * this.lines[i].duration, this.paperOffset(time));
-                if (i < 2 && time > slot.end && time < this.schedule[i + 1].start) {
-                    const a = this.linePoint(i, this.lines[i].duration, this.paperOffset(slot.end)).tip, b = this.linePoint(i + 1, 0, this.paperOffset(this.schedule[i + 1].start)).tip, u = M.range(time, slot.end, this.schedule[i + 1].start), tip = M.point(a, b, u);
+            // 阶段一：每一视觉行有独立的书写时段，笔尖和墨迹采样完全相同。
+            for (let i = 0; i < segments.length; i++) {
+                const part = segments[i], next = segments[i + 1];
+                if (time >= part.start && time <= part.end) {
+                    const clock = part.from + (part.to - part.from) * (time - part.start) / (part.end - part.start);
+                    return this.linePoint(part.index, clock, this.paperOffset(time));
+                }
+                // 阶段二：换视觉行/换字段时抬笔；纸面此时才移动，不能画出跨行连线。
+                if (next && time > part.end && time < next.start) {
+                    const a = this.linePoint(part.index, part.to, part.offset).tip;
+                    const b = this.linePoint(next.index, next.from, next.offset).tip;
+                    const u = M.range(time, part.end, next.start), tip = M.point(a, b, u);
                     tip[1] -= Math.sin(u * Math.PI) ** 2 * 12;
                     return { tip, down: false };
                 }
             }
-            return { ...this.linePoint(2, this.lines[2].duration, PAPER.writingOffset - PAPER.pitch * 2), down: false };
+            const last = segments.at(-1);
+            return { ...this.linePoint(last.index, last.to, last.offset), down: false };
         }
         /**
          * 输入：time（记录场景时间）。
@@ -227,52 +234,116 @@ __fluffyModules["animation.js"] = (() => {
             };
         }
         /**
-         * 输入：time（记录场景时间）。
-         * 输出：无。
-         * 功能：绘制三份逻辑行的循环副本；所有副本共用各行已完成的墨迹进度。
+         * 输入：无，读取当前场景、归位进度及滚动元素。
+         * 输出：无，更新可滚动区域可见性。
+         * 功能：归位完成后启用单份有限笔记，切换前后仍使用相同笔路和坐标，不换图片。
+         */
+        synchronizeNotebook() {
+            if (!this.notebook) return;
+            const reading = this.scene === "record" && this.time >= this.paperReturnEnd;
+            if (reading !== this.readingPaper) {
+                // 阶段一：只在书写/阅读边界重置一次，之后每帧保留手动滚动。
+                this.notebook.hidden = !reading;
+                this.notebook.scrollTop = 0;
+                this.paperScroll = 0;
+                this.readingPaper = reading;
+            }
+            if (!reading) return;
+            // 阶段二：先夹住实际scrollTop，Safari回弹值不能使首尾循环回来。
+            this.paperScroll = Notebook.clamp(this.notebook.scrollTop, 0, this.paperLayout.maxScroll);
+            const en = __fluffyModules["entry-i18n.js"]?.language() === "en";
+            this.notebook.setAttribute("aria-label", en ? "Written record" : "写好的记录");
+            this.notebook.dataset.scrollable = String(this.paperLayout.maxScroll > 0);
+        }
+        /**
+         * 输入：原生 scroll 事件（不需要读取事件参数）。
+         * 输出：无，同步有限位移和画面。
+         * 功能：手指/滚轮滚动只移动卡片里的笔记，不移动猫咪、卡片或继续按钮。
+         */
+        readNotebook() {
+            if (!this.readingPaper || this.scene !== "record" || !this.paperLayout) return;
+            this.paperScroll = Notebook.clamp(this.notebook.scrollTop, 0, this.paperLayout.maxScroll);
+            this.render();
+        }
+        /**
+         * 输入：event（笔记区域键盘事件）。
+         * 输出：无，改变原生scrollTop。
+         * 功能：键盘用户也能到达记录顶部、底部或逐屏浏览，不依赖可见滚动条。
+         */
+        notebookKey(event) {
+            if (!this.readingPaper || event.altKey || event.ctrlKey || event.metaKey) return;
+            const current = this.notebook.scrollTop, page = this.paperLayout.viewportHeight * .85;
+            const targets = { ArrowDown: current + 36, ArrowUp: current - 36, PageDown: current + page,
+                PageUp: current - page, Home: 0, End: this.paperLayout.maxScroll, " ": current + (event.shiftKey ? -page : page) };
+            if (!Object.hasOwn(targets, event.key)) return;
+            event.preventDefault();
+            this.notebook.scrollTop = Notebook.clamp(targets[event.key], 0, this.paperLayout.maxScroll);
+            this.readNotebook();
+        }
+        /**
+         * 输入：index、time、offset（字段与纸面位置）。
+         * 输出：续行标题的固定/退出位置，或 null。
+         * 功能：长字段在笔尖附近保留自身标题；换项时随纸淡出，阅读时完全取消固定标题。
+         */
+        continuationTitle(index, time, offset) {
+            if (time >= this.paperReturnEnd) return null;
+            const segments = this.paperTimeline.segments;
+            for (let i = 0; i < segments.length; i++) {
+                const part = segments[i], next = segments[i + 1];
+                if (part.index !== index || time < part.start || time >= (next?.start ?? this.paperReturnEnd)) continue;
+                const continuation = part.row > 0 || next?.index === index && time > part.end;
+                if (!continuation) return null;
+                const pin = PAPER.originY + PAPER.writingOffset + PAPER.labelOffset;
+                // 同字段换行标题不跳；跨字段或最终归位时与正在离开的纸段保持同速。
+                return time > part.end && next?.index !== index ? pin + offset - part.offset : pin;
+            }
+            return null;
+        }
+        /**
+         * 输入：time（记录场景时钟）。
+         * 输出：无，绘制循环写字或有限阅读，并输出几何诊断信息。
+         * 功能：完整保留任意字段/任意行数；字段间固定留白；写完后只有一个首尾有界的笔记。
          */
         drawPaper(time) {
-            const ctx = this.ctx, offset = this.paperOffset(time);
-            this.metrics.paperOffset = offset;
+            const ctx = this.ctx, reading = time >= this.paperReturnEnd;
+            const offset = this.paperOffset(time), layout = this.paperLayout;
+            this.metrics.paperOffset = reading ? -this.paperScroll : offset;
+            this.metrics.paperMode = reading ? "reading" : "writing";
             this.metrics.paperRows = [];
-            const clipBottom = M.mix(686, PAPER.clipBottom, M.range(time, this.writeEnd + .25, this.writeEnd + 2.25));
-            this.metrics.paperClip = [PAPER.clipTop, clipBottom];
+            this.metrics.paperScroll = this.paperScroll;
+            this.metrics.paperMaxScroll = layout.maxScroll;
+            this.metrics.paperPeriod = layout.period;
+            this.metrics.paperClip = [PAPER.clipTop, PAPER.clipBottom];
             ctx.save();
-            // 阶段一：遵守卡片圆角，但不裁掉正在写的顶部标题。
-            ctx.beginPath();
-            ctx.roundRect(21, 415, 351, 302, 44);
-            ctx.clip();
-            ctx.beginPath();
-            ctx.rect(42, PAPER.clipTop, 310, clipBottom - PAPER.clipTop);
-            ctx.clip();
-            // 阶段二：“标题＋内容＋书写线”作为一个完整单元参与循环。
+            // 阶段一：几何裁切与透明原生滚动区一致，猫和卡片框不会被卷入滚动。
+            ctx.beginPath(); ctx.roundRect(21, 415, 351, 302, 44); ctx.clip();
+            ctx.beginPath(); ctx.rect(PAPER.left, PAPER.clipTop, PAPER.width, layout.viewportHeight); ctx.clip();
+            // 阶段二：书写绘制必要副本；阅读positions只返回一次，绝不会首尾取模。
             for (let i = 0; i < this.rows.length; i++) {
-                const slot = this.schedule[i], line = this.lines[i], progress = M.clamp((time - slot.start) / (slot.end - slot.start));
-                for (const position of circularPositions(i, offset, PAPER.pitch)) {
-                    const y = PAPER.originY + position;
-                    if (y + (line.ruleOffsets?.at(-1) || line.height) + 2 < PAPER.clipTop || y - 29 > clipBottom)
-                        continue;
-                    const labelY = y + PAPER.labelOffset;
+                const line = this.lines[i], field = layout.fields[i];
+                const clock = reading ? line.duration : Notebook.fieldClock(this.paperTimeline, this.lines, i, time);
+                const active = !reading && time >= this.schedule[i].start && time <= this.schedule[i].end;
+                for (const position of Notebook.positions(layout, i, offset, reading, this.paperScroll)) {
+                    const y = position.y;
+                    const sticky = !reading && position.canonical ? this.continuationTitle(i, time, offset) : null;
+                    const labelY = sticky ?? y + PAPER.labelOffset;
+                    if (y + field.lastRule + 2 < PAPER.clipTop || Math.min(labelY - PAPER.labelAscent, y) > PAPER.clipBottom) continue;
                     ctx.fillStyle = "#748caf";
                     ctx.font = '600 17px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-                    ctx.fillText(this.rows[i].label, 56, labelY);
-                    // 横线紧随本视觉行的墨迹下边缘；折行后每行也各有一条线。
-                    const rules = line.ruleOffsets || [line.size + 3];
-                    ctx.strokeStyle = "#dce5ee";
-                    ctx.lineWidth = 1.25;
-                    for (const rule of rules) {
-                        ctx.beginPath();
-                        ctx.moveTo(53, y + rule);
-                        ctx.lineTo(340, y + rule);
-                        ctx.stroke();
+                    ctx.fillText(this.rows[i].label, PAPER.inkX, labelY);
+                    ctx.save();
+                    // 多行续写时，上方已写的行离开可视区，不穿过仍在笔尖上方的字段标题。
+                    if (sticky !== null && labelY > PAPER.clipTop - 20) {
+                        ctx.beginPath(); ctx.rect(PAPER.left, labelY + 10, PAPER.width, Math.max(0, PAPER.clipBottom - labelY - 10)); ctx.clip();
                     }
-                    if (time >= slot.start)
-                        drawHandwriting(ctx, line, progress * line.duration, 56, y);
-                    this.metrics.paperRows.push({
-                        index: i, label: this.rows[i].label, labelY, inkY: y,
-                        rules: rules.map(rule => y + rule), active: time >= slot.start && time <= slot.end,
-                        canonical: Math.abs(y - this.rowOrigin(i, offset)) < .001
-                    });
+                    ctx.strokeStyle = "#dce5ee"; ctx.lineWidth = 1.25;
+                    for (const rule of line.ruleOffsets) {
+                        ctx.beginPath(); ctx.moveTo(PAPER.ruleLeft, y + rule); ctx.lineTo(PAPER.ruleRight, y + rule); ctx.stroke();
+                    }
+                    if (time >= this.schedule[i].start || reading) drawHandwriting(ctx, line, clock, PAPER.inkX, y);
+                    ctx.restore();
+                    this.metrics.paperRows.push({ index: i, label: this.rows[i].label, labelY, inkY: y,
+                        rules: line.ruleOffsets.map(rule => y + rule), active, canonical: position.canonical, cycle: position.cycle, sticky: sticky !== null });
                 }
             }
             ctx.restore();
@@ -370,7 +441,6 @@ __fluffyModules["animation.js"] = (() => {
             $("pet").hidden = entry;
             $("pet").style.top = hero ? "371px" : "193px";
             $("pet").style.height = hero ? "248px" : "223px";
-            $("edit-record").hidden = !record || this.time < 1.6;
             const titles = ["今天的运动，讲给我听。", "Great job!", "Log Your Workout", "Almost done!", "All set! ♡"];
             const subtitles = ["", "", "Write it down, step by step!", "Putting it away…", "Rest well, you did it."];
             $("record-title").textContent = titles[phase];
@@ -396,6 +466,7 @@ __fluffyModules["animation.js"] = (() => {
             ctx.setTransform(2, 0, 0, 2, 0, 0);
             ctx.clearRect(0, 0, 393, 852);
             this.synchronize();
+            this.synchronizeNotebook();
             // 阶段一：输入、聆听和整理共用记录猫；只改变头部倾斜、耳朵与呼吸。
             if (this.scene === "home") {
                 // 首页沿用庆祝页的同一原画，只使用待机参数，不循环播放撒花。

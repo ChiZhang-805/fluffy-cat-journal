@@ -181,23 +181,33 @@ __fluffyModules["catalog.js"] = (() => {
         return Sleep.clock(s);
     }
     /**
-     * 输入：record（已校验记录）。
-     * 输出：三项短记录。
-     * 功能：用实际确认内容生成猫咪笔路，完整营养信息仍保留在历史。
+     * 输入：record（已校验、已确认的记录）。
+     * 输出：完整笔记字段数组，数量不限于三项。
+     * 功能：所有已确认信息进入书写及完成后的阅读；未知营养值保留空缺，不生成新数值。
      */
     function rows(record) {
         const id = record.category, v = id === "sport" ? sportData(record.data) : record.data;
+        // 阶段一：保留原字段顺序；运动继续项目、时长、备注三项。
         if (id === "sport")
-            return [{ label: "Activity", value: v.activity }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes }];
+            return [{ label: "Activity", value: v.activity || "—" }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes || "—" }];
+        // 阶段二：饮食的份量和四个营养值各自成项，不再摘要掉碳水与脂肪。
         if (id === "food")
-            return [{ label: v.meal || "Meal", value: v.foods }, { label: "Nutrition · 估算", value: v.calories != null ? `约 ${v.calories} kcal` : v.portion || "份量未记录" }, { label: "Notes", value: v.notes || (v.protein != null ? `蛋白质约 ${v.protein} g` : "未填写备注") }];
+            return [{ label: v.meal || "Meal", value: v.foods || "—" },
+                { label: "Portion", value: v.portion || "—" },
+                ...[["Calories", "calories", "kcal"], ["Protein", "protein", "g"], ["Carbs", "carbs", "g"], ["Fat", "fat", "g"]]
+                    .map(([label, key, unit]) => ({ label, value: v[key] == null || v[key] === "" ? "—" : `${v[key]} ${unit}` })),
+                { label: "Notes", value: v.notes || "—" }];
         if (id === "mood")
-            return [{ label: "Feeling", value: v.mood }, { label: "Moment", value: v.reason || "未填写事件" }, { label: "Notes", value: v.notes || "未填写备注" }];
+            return [{ label: "Feeling", value: v.mood || "—" }, { label: "Moment", value: v.reason || "—" }, { label: "Notes", value: v.notes || "未填写备注" }];
         if (id === "sleep")
-            return [{ label: "Sleep", value: `${shortTime(v.bedtime)} → ${shortTime(v.wakeTime)}` }, { label: "Duration", value: `${v.hours} h · ${v.quality}` }, { label: "Notes", value: v.notes || "未填写备注" }];
+            return [{ label: "Sleep", value: `${shortTime(v.bedtime)} → ${shortTime(v.wakeTime)}` },
+                { label: "Duration", value: v.hours == null ? "—" : `${v.hours} h` },
+                { label: "Feeling", value: v.quality || "—" }, { label: "Notes", value: v.notes || "—" }];
+        // 阶段三：面部同时展示眼周与皮肤，不再用二选一的 Observation 丢弃另一项。
         if (id === "face")
-            return [{ label: "My feeling · 自评", value: v.feeling }, { label: "Observation", value: v.eyeArea || v.skinAppearance || "未填写外观观察" }, { label: "Notes", value: v.notes || "未填写备注" }];
-        return [{ label: "Focus", value: v.task }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes || "一次一件事" }];
+            return [{ label: "My feeling", value: v.feeling || "—" }, { label: "Eye area", value: v.eyeArea || "—" },
+                { label: "Skin", value: v.skinAppearance || "—" }, { label: "Notes", value: v.notes || "—" }];
+        return [{ label: "Focus", value: v.task || "—" }, { label: "Time", value: `${v.durationMinutes} min` }, { label: "Notes", value: v.notes || "—" }];
     }
     /**
      * 输入：record 或空值。

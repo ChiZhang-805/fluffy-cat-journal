@@ -191,21 +191,28 @@ function glyphWidth(char, size) {
 /**
  * 输入：text（确认后的字段文字），maxWidth、maxHeight（显示区域）。
  * 输出：可绘制、可采样笔尖的 line 对象。
- * 功能：在卡片内自动换行与适量缩字号，不截断内容，不将未知汉字替换为空白。
+ * 功能：自动换行；maxHeight 为 Infinity 时保持 25px 字号，扩展实际纸面高度，不挤压长备注。
  */
 function makeHandwriting(text, maxWidth = 250, maxHeight = 54) {
     const chars = graphemes(text);
     let size = 25, placements;
-    // 阶段一：寻找能完整容纳文本的排版；长备注允许降到10px，避免第四行越过书写区，不裁切信息。
+    // 阶段一：有限高度调用保持兼容；笔记采用无限纸长，字号不随字数变小。
     while (size >= 10) {
         placements = [];
         let x = 0, row = 0;
-        for (const char of chars) {
-            const width = glyphWidth(char, size);
-            if (x + width > maxWidth && x > 0) {
-                x = 0;
-                row++;
+        for (let i = 0; i < chars.length; i++) {
+            const char = chars[i];
+            // 显式换行保留；英文按词换行，超长单词才按字素折行。
+            if (char === "\r") continue;
+            if (char === "\n") { x = 0; row++; continue; }
+            if (char === " " && x === 0) continue;
+            if (/[A-Za-z0-9]/.test(char) && (i === 0 || /[\s]/.test(chars[i - 1]))) {
+                let wordWidth = 0;
+                for (let j = i; j < chars.length && /[A-Za-z0-9'’-]/.test(chars[j]); j++) wordWidth += glyphWidth(chars[j], size);
+                if (wordWidth <= maxWidth && x > 0 && x + wordWidth > maxWidth) { x = 0; row++; }
             }
+            const width = glyphWidth(char, size);
+            if (x + width > maxWidth && x > 0) { x = 0; row++; }
             placements.push({ char, x, y: row * size * 1.45, row, width });
             x += width;
         }
@@ -251,7 +258,18 @@ function makeHandwriting(text, maxWidth = 250, maxHeight = 54) {
         const ink = strokes.filter(st => st.glyph.row === row).flatMap(st => st.points.map(point => point[1]));
         return (ink.length ? Math.max(...ink) : (row * 1.45 + 1) * size) + 3;
     });
-    return { text, strokes, glyphs, size, ruleOffsets, duration: Math.max(clock, .1), width: maxWidth, height: maxHeight };
+    // 阶段四：记录每一视觉行的笔画时间。自动送纸只在行间抬笔时发生。
+    const rowAdvance = size * 1.45;
+    const visualRows = Array.from({ length: rowCount }, (_, row) => {
+        const items = strokes.filter(stroke => stroke.glyph.row === row);
+        const last = items.at(-1);
+        return { row, offset: row * rowAdvance, start: items[0]?.start ?? 0,
+            end: last ? last.start + last.duration : .1 };
+    });
+    const measuredHeight = Math.max(size, ruleOffsets.at(-1) + 3);
+    return { text, strokes, glyphs, size, ruleOffsets, rowCount, rowAdvance, visualRows,
+        duration: Math.max(clock, .1), width: maxWidth,
+        height: Number.isFinite(maxHeight) ? maxHeight : measuredHeight, measuredHeight };
 }
 /**
  * 输入：stroke（路径），fraction（弧长比例）。

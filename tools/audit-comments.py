@@ -5,7 +5,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ['ai-policy.js','cat-feedback.js','bubble-copy.js','deepseek.js','bailian.js','speech.js','ai-journal.js','app.js','review.js','review-conversation.js','record-intent.js','display-language.js','bailian-settings.js','photo-draft.js','photo-input.js']
+FILES = ['notebook-layout.js','animation.js','handwriting.js','catalog.js','app.js']
 DECL = re.compile(r'^([ \t]*)(?:(?:async|static|get|set)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)\s*\([^\n]*\)\s*\{', re.M)
 EXCLUDED = {'if','for','while','switch','catch','with'}
 
@@ -32,8 +32,8 @@ def audit():
 
 if __name__=='__main__':
     items=audit()
-    payload={'scope':'Named declarations and class methods in release modules including photo ownership and decoding; inline event callbacks excluded','count':len(items),'results':items}
-    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'tests/results/comment-v11-audit.json'
+    payload={'scope':'Named declarations and class methods in v14 notebook geometry, handwriting, animation, catalog and app; inline callbacks excluded','count':len(items),'results':items}
+    output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT.parent/'verification/comment-v14-audit.json'
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
     failures=[item for item in items if not item['passed']]

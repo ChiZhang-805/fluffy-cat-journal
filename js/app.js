@@ -468,7 +468,6 @@ __fluffyModules["app.js"] = (() => {
         }
         $("back").setAttribute("aria-label", Locale.t("返回"));
         $("cancel-voice").textContent = Locale.t("取消");
-        $("edit-record").textContent = Locale.t("修改记录");
         $("entry-panel").setAttribute("aria-label", Locale.t("填写生活记录", "Journal entry"));
         refreshEntryCompletion();
         synchronizeEntryAction(animation);
@@ -2067,7 +2066,6 @@ __fluffyModules["app.js"] = (() => {
         $("pet").hidden = !(record || hero);
         $("pet").style.top = hero ? "371px" : "193px";
         $("pet").style.height = hero ? "248px" : "223px";
-        $("edit-record").hidden = !record || a.time < 1.6;
         const phase = record ? (a.time < a.writeEnd ? 2 : a.time < a.writeEnd + 3.75 ? 3 : 4) : 0;
         if (record) {
             const title = phase === 2 ? `Log Your ${Catalog.category(state.record?.category || state.category).en}` : phase === 3 ? "Almost done!" : "All set! ♡";
@@ -2250,7 +2248,6 @@ __fluffyModules["app.js"] = (() => {
         });
         $("cancel-voice").onclick = () => cancelWork();
         $("primary").onclick = primaryAction;
-        $("edit-record").onclick = editRecord;
         $("back").onclick = () => {
             if (animation.scene === "record")
                 editRecord();
