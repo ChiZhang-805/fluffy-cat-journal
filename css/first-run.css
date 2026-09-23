@@ -1,0 +1,7 @@
+/* First run is a real interactive page, not a screenshot over the existing app. */
+html[data-first-run="pending"] .stage,
+html[data-first-run="pending"] .provider-toolbar,
+html[data-first-run="pending"] #api-popover,
+html[data-first-run="pending"] #bailian-popover{visibility:hidden!important;pointer-events:none!important}
+#nava-first-run{position:fixed;inset:0;z-index:100000;overflow:hidden;background:#eaf5fb;isolation:isolate}
+#nava-onboarding-frame{display:block;width:100%;height:100%;border:0;background:#eaf5fb;color-scheme:light}

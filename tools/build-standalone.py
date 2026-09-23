@@ -33,7 +33,9 @@ def build(output: Path) -> None:
         css = (ROOT / href.split('?')[0]).read_text(encoding='utf-8')
         html = re.sub(r'<link[^>]*href="' + re.escape(href) + r'"[^>]*>', lambda _: '<style>\n' + css + '\n</style>', html)
     html = html.replace('assets/favicon.svg', assets['favicon.svg'])
-    script = 'window.CAT_ASSETS=' + json.dumps(assets, ensure_ascii=False) + ';\n' + '\n'.join(scripts)
+    onboarding = (ROOT / 'onboarding.html').read_text(encoding='utf-8')
+    bootstrap = 'window.NAVA_ONBOARDING_HTML=' + json.dumps(onboarding, ensure_ascii=False) + ';\n'
+    script = bootstrap + 'window.CAT_ASSETS=' + json.dumps(assets, ensure_ascii=False) + ';\n' + '\n'.join(scripts)
     script = re.sub(r'</script', r'<\\/script', script, flags=re.I)
     html = html.replace('</body>', '<script>\n' + script + '\n</script>\n</body>')
     # 阶段三：只生成实际程序；不会内嵌测试存储、示例响应或真实凭据。
@@ -43,4 +45,4 @@ def build(output: Path) -> None:
 
 
 if __name__ == '__main__':
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'Fluffy-Cat-v16.html')
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / 'NAVA-Fluffy-v17.html')

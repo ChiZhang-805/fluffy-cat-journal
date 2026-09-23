@@ -1,13 +1,13 @@
 {
   "name": "fluffy-cat-pages",
-  "version": "16.0.0",
+  "version": "17.0.0",
   "private": true,
-  "description": "Field-aware AI drafts, considerate companion dialogue, lifecycle recovery and two-second notebook continue",
+  "description": "NAVA first notes onboarding connected to the existing six-category journal",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:browser": "python tests/refinement_v16_browser.py",
+    "test:browser": "python tests/first_run_v17_browser.py ../NAVA-Fluffy-v17.html",
     "evaluate:emotion": "node tools/evaluate-emotion.cjs",
-    "build:standalone": "python tools/build-standalone.py ../Fluffy-Cat-v16.html",
+    "build:standalone": "python tools/build-standalone.py ../NAVA-Fluffy-v17.html",
     "test:recap": "node --test tests/review.test.cjs",
     "test:v9": "node --test tests/entry-action.test.cjs && python tests/interaction_v9_browser_test.py",
     "test:v10": "node --test tests/entry-action.test.cjs tests/review-layout.test.cjs && python tests/refinement_v10_browser_test.py",
@@ -17,7 +17,8 @@
     "test:v14": "node --test tests/notebook-v14.test.cjs && python tests/notebook_v14_browser.py",
     "test:v15": "node --test tests/chat-v15.test.cjs && python tests/chat_v15_browser.py",
     "test:v16": "node --test tests/refinement-v16.test.cjs && python tests/refinement_v16_browser.py",
-    "evaluate:ai": "node tools/evaluate-ai.cjs"
+    "evaluate:ai": "node tools/evaluate-ai.cjs",
+    "test:v17": "node --test tests/first-run-v17.test.cjs && python tests/first_run_v17_browser.py ../NAVA-Fluffy-v17.html"
   },
   "engines": {
     "node": ">=20"

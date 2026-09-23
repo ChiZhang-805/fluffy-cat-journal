@@ -1829,6 +1829,15 @@ __fluffyModules["app.js"] = (() => {
         }
         root.append(grid);
         sheetAction(root, Locale.t("语言切换"), "language", () => languageSheet());
+        if (__fluffyModules["first-run.js"]?.getProfile()) {
+            sheetAction(root, Locale.t("初见手记", "Our first notes"), "history", async () => {
+                cancelWork(false);
+                if (review?.active) review.leave();
+                const result = await __fluffyModules["first-run.js"].openSummary();
+                changeLanguage(result.profile.language);
+                navigate("home", { transition: false });
+            });
+        }
         for (const [text, name, action, danger] of [
             [animation.reducedMotion ? "轻柔动效 · 已开启" : "轻柔动效", "leaf", () => {
                     animation.reducedMotion = !animation.reducedMotion;
@@ -2408,7 +2417,15 @@ __fluffyModules["app.js"] = (() => {
         });
         setInterval(checkFocus, 200);
     }
-    $("entry-bubble").addEventListener("click", retryWords);
+    /**
+     * 输入：无。
+     * 输出：Promise<void>，引导完成后初始化原有应用一次。
+     * 功能：初见资料与原记录隔离；等待保存确认后恢复首页、计时、语言与既有记录，不新增模拟记录。
+     */
+    async function initializeApplication() {
+        const FirstRun = __fluffyModules["first-run.js"];
+        await FirstRun?.beforeStart();
+        $("entry-bubble").addEventListener("click", retryWords);
     $("entry-bubble").addEventListener("keydown", e => {
         if (["Enter", " "].includes(e.key) && $("entry-bubble").dataset.retry === "true") { e.preventDefault(); retryWords(); }
     });
@@ -2418,13 +2435,15 @@ __fluffyModules["app.js"] = (() => {
     homeBubble("home");
     animation.reducedMotion = Boolean(Store.read("fluffy-reduced-motion", matchMedia("(prefers-reduced-motion: reduce)").matches));
     document.body.classList.toggle("reduce-motion", animation.reducedMotion);
-    animation.initialize().catch(() => {
-        $("loading").textContent = "小猫图层没有加载完成，请刷新重试。";
-    });
+    try { await animation.initialize(); }
+    catch { $("loading").textContent = Locale.t("小猫图层没有加载完成，请刷新重试。", "The cat artwork could not load. Please reload."); }
+    await FirstRun?.appReady();
     if (new URLSearchParams(location.search).has("debug") || window.FLUFFY_TEST) {
         window.FluffyDebug = {
             animation, state, review, continueGate, Trace, retryWords, organizeWords, toast, openCategory, newEntry, chooseEntry, offerIntent, refreshEntryCompletion, synchronizeEntryAction, openReview, entryMenu, changeRecordDate, changeLanguage, board, timer, photo, speech, rawAudio, bailianSettings, microphone, gesture, get timeRange() { return timeRange; }, get formLayout() { return formLayout; }, languageSheet, prepareIntentDraft, estimateTime, acceptPhoto, selectPhotoFile, analyzePhoto, removePhoto, bubble, homeBubble, showPhoto, openEntry, navigate, fillForm, rawForm, confirmManual, primaryAction, beginSpeech, releaseSpeech, cancelWork, finishFocus, checkFocus, showSheet, closeSheet, renderForm, saveTaskLater, apiTest: window.FLUFFY_TEST ? api : undefined, bailianTest: window.FLUFFY_TEST ? bailian : undefined
         };
     }
-    return {};
+    }
+    const ready = initializeApplication();
+    return { ready };
 })();
